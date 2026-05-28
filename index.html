@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>光學智慧打卡系統</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; }
+        video { width: 100%; max-width: 300px; background: #000; border: 2px solid #ccc; }
+        #status { font-weight: bold; color: blue; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h2>請輸入學號並對準閃爍燈光</h2>
+    <input type="text" id="studentId" placeholder="輸入學號 (例: 112001)" />
+    <br><br>
+    
+    <video id="video" autoplay playsinline></video>
+    <br>
+    <button id="startBtn" onclick="startCamera()">啟動相機掃描</button>
+    <div id="status">等待操作...</div>
+
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const statusDiv = document.getElementById('status');
+        
+        // 請將下方的網址替換成您的 Google Apps Script 部署網址
+        const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
+
+        function startCamera() {
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then(function(stream) {
+                video.srcObject = stream;
+                statusDiv.innerText = "相機已啟動，正在偵測光訊號...";
+                // 啟動影像分析迴圈 (每 50ms 檢查一次)
+                setInterval(analyzeLight, 50); 
+            })
+            .catch(function(err) {
+                statusDiv.innerText = "無法存取相機：" + err;
+            });
+        }
+
+        function analyzeLight() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                // 將影片當下畫面畫到 canvas 上
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // 擷取畫面正中央的一小塊區域來判斷亮度
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+                const imageData = ctx.getImageData(centerX - 5, centerY - 5, 10, 10);
+                const data = imageData.data;
+                
+                let brightness = 0;
+                for (let i = 0; i < data.length; i += 4) {
+                    // RGB 轉灰階亮度的簡易公式
+                    brightness += (data[i] + data[i+1] + data[i+2]) / 3; 
+                }
+                brightness = brightness / (data.length / 4);
+
+                // 這裡是一個極度簡化的解碼觸發邏輯
+                // 實務上需要紀錄明暗時間的陣列來解析摩斯密碼 (此處以偵測到極強光線作為模擬觸發)
+                if (brightness > 240) { 
+                    statusDiv.innerText = "偵測到教室訊號 [A]！正在打卡...";
+                    sendData("A");
+                }
+            }
+        }
+
+        // 將資料發送給 Google 雲端
+        let isSending = false;
+        function sendData(roomCode) {
+            if (isSending) return; // 避免重複發送
+            isSending = true;
+            const studentId = document.getElementById('studentId').value;
+            
+            if(!studentId) {
+                alert("請先輸入學號！");
+                isSending = false;
+                return;
+            }
+
+            const fetchUrl = `${API_URL}?student_id=${studentId}&room=${roomCode}`;
+            
+            fetch(fetchUrl)
+                .then(response => response.text())
+                .then(result => {
+                    statusDiv.innerText = result + " (已紀錄至試算表)";
+                    statusDiv.style.color = "green";
+                })
+                .catch(error => {
+                    statusDiv.innerText = "網路錯誤，請重試";
+                    isSending = false;
+                });
+        }
+    </script>
+</body>
+</html>
