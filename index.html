@@ -6,7 +6,32 @@
     <title>光學智慧打卡系統</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; }
-        video { width: 100%; max-width: 300px; background: #000; border: 2px solid #ccc; }
+        
+        /* 替影片加上容器，用來定位準星 */
+        .video-container {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+            max-width: 300px;
+            border: 2px solid #ccc;
+            background: #000;
+        }
+        
+        video { width: 100%; display: block; }
+        
+        /* 畫面的狙擊準星 */
+        .target-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 30px;      /* 準星寬度 */
+            height: 30px;     /* 準星高度 */
+            transform: translate(-50%, -50%);
+            border: 2px solid #00ff00; /* 螢光綠色邊框 */
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.8);
+            pointer-events: none; /* 避免擋住點擊 */
+        }
+        
         #status { font-weight: bold; color: blue; margin-top: 10px; }
     </style>
 </head>
@@ -15,8 +40,12 @@
     <input type="text" id="studentId" placeholder="輸入學號 (例: 112001)" />
     <br><br>
     
-    <video id="video" autoplay playsinline></video>
+    <div class="video-container">
+        <video id="video" autoplay playsinline></video>
+        <div class="target-box"></div>
+    </div>
     <br>
+    
     <button id="startBtn" onclick="startCamera()">啟動相機掃描</button>
     <div id="status">等待操作...</div>
 
@@ -28,14 +57,14 @@
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         const statusDiv = document.getElementById('status');
         
-        // 您的專屬 Google API 網址已設定完畢
+        // 請確保這行是您正確的 API 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
             .then(function(stream) {
                 video.srcObject = stream;
-                statusDiv.innerText = "相機已啟動，正在偵測光訊號...";
+                statusDiv.innerText = "相機已啟動，請將綠色準星對準光源...";
                 setInterval(analyzeLight, 50); 
             })
             .catch(function(err) {
@@ -60,7 +89,8 @@
                 }
                 brightness = brightness / (data.length / 4);
 
-                if (brightness > 254) { 
+                // 亮度門檻設定為 250，避免環境光誤觸
+                if (brightness > 250) { 
                     statusDiv.innerText = "偵測到教室訊號 [A]！正在打卡...";
                     sendData("A");
                 }
