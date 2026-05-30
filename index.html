@@ -28,7 +28,7 @@
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         const statusDiv = document.getElementById('status');
         
-        // 請將下方的網址替換成您的 Google Apps Script 部署網址
+        // 您的專屬 Google API 網址已設定完畢
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
         function startCamera() {
@@ -36,7 +36,6 @@
             .then(function(stream) {
                 video.srcObject = stream;
                 statusDiv.innerText = "相機已啟動，正在偵測光訊號...";
-                // 啟動影像分析迴圈 (每 50ms 檢查一次)
                 setInterval(analyzeLight, 50); 
             })
             .catch(function(err) {
@@ -48,10 +47,8 @@
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
-                // 將影片當下畫面畫到 canvas 上
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                // 擷取畫面正中央的一小塊區域來判斷亮度
                 const centerX = canvas.width / 2;
                 const centerY = canvas.height / 2;
                 const imageData = ctx.getImageData(centerX - 5, centerY - 5, 10, 10);
@@ -59,13 +56,10 @@
                 
                 let brightness = 0;
                 for (let i = 0; i < data.length; i += 4) {
-                    // RGB 轉灰階亮度的簡易公式
                     brightness += (data[i] + data[i+1] + data[i+2]) / 3; 
                 }
                 brightness = brightness / (data.length / 4);
 
-                // 這裡是一個極度簡化的解碼觸發邏輯
-                // 實務上需要紀錄明暗時間的陣列來解析摩斯密碼 (此處以偵測到極強光線作為模擬觸發)
                 if (brightness > 240) { 
                     statusDiv.innerText = "偵測到教室訊號 [A]！正在打卡...";
                     sendData("A");
@@ -73,10 +67,9 @@
             }
         }
 
-        // 將資料發送給 Google 雲端
         let isSending = false;
         function sendData(roomCode) {
-            if (isSending) return; // 避免重複發送
+            if (isSending) return; 
             isSending = true;
             const studentId = document.getElementById('studentId').value;
             
