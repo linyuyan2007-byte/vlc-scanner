@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (防爆暖機版)</title>
+    <title>Li-Fi 商業級打卡系統 (動態防偽版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -72,19 +72,21 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        // 確保這是您的專屬 Google API
+        // 您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
         const COOLDOWN_MS = 60000; 
         let validFrameCount = 0; 
-        let isWarmingUp = false; // 新增：暖機狀態鎖
+        let isWarmingUp = false; 
+        
+        // 【核心武器】：儲存上一格畫面的亮度，用來抓出靜態作弊者
+        let prevBrightnessValues = []; 
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", frameRate: { ideal: 30, max: 60 } } })
             .then(function(stream) {
                 video.srcObject = stream;
                 
-                // 【新增護城河】：相機啟動時強制暖機 2 秒，過濾掉開機瞬間的過曝閃爍
                 isWarmingUp = true;
                 statusDiv.innerText = "⏳ 相機暖機中，請稍候...";
                 statusDiv.style.color = "orange";
@@ -103,7 +105,6 @@
         }
 
         function analyzeStripes() {
-            // 如果還在暖機，或者正在傳送資料，就跳過所有運算
             if (isWarmingUp || isSending) return;
 
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
@@ -128,10 +129,23 @@
                 let minB = Math.min(...brightnessValues);
                 let contrast = maxB - minB;
                 
+                // 1. 計算空間總波動
                 let totalVariation = 0;
                 for (let i = 1; i < brightnessValues.length; i++) {
                     totalVariation += Math.abs(brightnessValues[i] - brightnessValues[i-1]);
                 }
+
+                // 2. 【核心防禦】：計算時間維度的「動態閃爍值 (Temporal Change)」
+                let temporalChange = 0;
+                if (prevBrightnessValues.length === brightnessValues.length) {
+                    let totalDiff = 0;
+                    for (let i = 0; i < brightnessValues.length; i++) {
+                        totalDiff += Math.abs(brightnessValues[i] - prevBrightnessValues[i]);
+                    }
+                    temporalChange = totalDiff / brightnessValues.length;
+                }
+                // 將當前數據深拷貝給下一格使用
+                prevBrightnessValues = [...brightnessValues];
 
                 let averageBrightness = brightnessValues.reduce((a, b) => a + b, 0) / brightnessValues.length;
                 let crossings = 0;
@@ -159,26 +173,28 @@
                     }
                 }
 
-                debugDiv.innerText = `最亮:${Math.round(maxB)} | 對比:${Math.round(contrast)} | 波動:${Math.round(totalVariation)} | 條紋:${crossings}`;
+                // 除錯面板新增「動態」指標
+                debugDiv.innerText = `最亮:${Math.round(maxB)} | 對比:${Math.round(contrast)} | 條紋:${crossings} | 動態:${temporalChange.toFixed(1)}`;
 
                 // ==========================================
-                // 無懈可擊的 4 道防爆邏輯
+                // 無懈可擊的 5 道防護網 (時空雙重驗證)
                 // ==========================================
                 let isSignalValid = false;
 
-                // 條件一：最亮必須 >= 245 (物理強光)
-                // 條件二：對比度必須 > 150 (必須有極亮與極暗，排除全白過曝畫面) <-- 剛才漏掉的關鍵！
-                // 條件三：總波動大於 800 (高頻特徵)
-                // 條件四：條紋數 >= 6 (至少要有 6 條黑白相間，排除手抖產生的假條紋)
-                // 條件五：條紋規律 (isRegular)
-                if (maxB >= 245 && contrast > 150 && totalVariation > 800 && crossings >= 6 && isRegular) {
+                // 條件一：最亮 >= 245
+                // 條件二：對比度 > 150
+                // 條件三：總波動 > 800
+                // 條件四：條紋數 >= 3
+                // 條件五：【終極封殺】動態閃爍值必須 > 5.0！
+                // 靜態的排針、螺絲、印刷字體，動態值通常只有 0.5~1.8，會在這裡被當場擊落！
+                if (maxB >= 245 && contrast > 150 && totalVariation > 800 && crossings >= 3 && isRegular && temporalChange > 5.0) {
                     isSignalValid = true;
                 }
 
                 if (isSignalValid) {
                     validFrameCount++;
                     if (validFrameCount < 3) {
-                        statusDiv.innerText = `🔍 強光幾何特徵驗證中... (${validFrameCount}/3)`;
+                        statusDiv.innerText = `🔍 動態加密特徵驗證中... (${validFrameCount}/3)`;
                         statusDiv.style.color = "orange";
                     } else {
                         sendData("A");
@@ -219,7 +235,7 @@
             }
 
             isSending = true;
-            statusDiv.innerText = "🔒 物理防偽驗證通過！傳送中...";
+            statusDiv.innerText = "🔒 特徵防偽驗證通過！傳送中...";
             statusDiv.style.color = "#007bff";
 
             const fetchUrl = `${API_URL}?student_id=${studentId}&room=${roomCode}`;
