@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (波動值防禦版)</title>
+    <title>Li-Fi 商業級打卡系統 (絕對物理封鎖版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -41,7 +41,7 @@
         }
         
         #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
-        #debug { color: #555; font-size: 12px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; }
+        #debug { color: #555; font-size: 11px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; font-weight:bold; }
         input { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 220px; }
         button { padding: 12px 24px; font-size: 16px; background-color: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
         button:hover { background-color: #27ae60; }
@@ -61,7 +61,7 @@
     
     <button id="startBtn" onclick="startCamera()">開啟 Li-Fi 掃描</button>
     <div id="status">系統就緒，等待掃描...</div>
-    <div id="debug">條紋特徵與環境分析中...</div>
+    <div id="debug">系統分析中...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -75,7 +75,7 @@
         // 確保這是您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
-        const COOLDOWN_MS = 60000; // 1分鐘防刷冷卻
+        const COOLDOWN_MS = 60000; 
         let validFrameCount = 0; 
 
         function startCamera() {
@@ -106,54 +106,62 @@
                 const data = imageData.data;
                 
                 let brightnessValues = [];
-                let totalBrightness = 0;
-                
                 for (let i = 0; i < data.length; i += 4) {
-                    let brightness = (data[i] + data[i+1] + data[i+2]) / 3;
-                    brightnessValues.push(brightness);
-                    totalBrightness += brightness;
+                    brightnessValues.push((data[i] + data[i+1] + data[i+2]) / 3);
                 }
                 
-                let averageBrightness = totalBrightness / brightnessValues.length;
+                // 1. 取得絕對最高亮度與最低亮度
+                let maxB = Math.max(...brightnessValues);
+                let minB = Math.min(...brightnessValues);
+                let contrast = maxB - minB;
                 
-                // 【終極防禦】：計算總波動值 (Total Variation)
+                // 2. 計算總波動值
                 let totalVariation = 0;
                 for (let i = 1; i < brightnessValues.length; i++) {
                     totalVariation += Math.abs(brightnessValues[i] - brightnessValues[i-1]);
                 }
-                
-                let maxB = brightnessValues[0]; 
-                let minB = brightnessValues[0];
-                for(let b of brightnessValues) {
-                    if(b > maxB) maxB = b;
-                    if(b < minB) minB = b;
-                }
-                let contrast = maxB - minB;
 
+                // 3. 計算條紋與寬度
+                let averageBrightness = brightnessValues.reduce((a, b) => a + b, 0) / brightnessValues.length;
                 let crossings = 0;
                 let lastSign = (brightnessValues[0] >= averageBrightness) ? 1 : -1;
+                let lastCrossingIndex = 0;
+                let stripeWidths = [];
                 
                 for (let i = 1; i < brightnessValues.length; i++) {
                     let currentSign = (brightnessValues[i] >= averageBrightness) ? 1 : -1;
                     if (currentSign !== lastSign) {
                         crossings++;
+                        stripeWidths.push(i - lastCrossingIndex);
+                        lastCrossingIndex = i;
                         lastSign = currentSign;
                     }
                 }
 
-                // 將數值顯示在除錯畫面上，方便您觀察發射器與電腦螢幕的差異
-                debugDiv.innerText = `波動:${Math.round(totalVariation)} | 對比:${Math.round(contrast)} | 條紋:${crossings}`;
+                // 4. 嚴格對稱性驗證 (排除頭尾不完整的條紋)
+                let isRegular = false;
+                if (stripeWidths.length >= 2) {
+                    let validWidths = stripeWidths.length > 3 ? stripeWidths.slice(1, -1) : stripeWidths;
+                    let minW = Math.min(...validWidths);
+                    let maxW = Math.max(...validWidths);
+                    if ((maxW - minW) <= 12) { // 條紋寬度誤差不得超過 12 像素
+                        isRegular = true;
+                    }
+                }
+
+                // 即時顯示核心數據
+                debugDiv.innerText = `最高亮:${Math.round(maxB)} | 波動:${Math.round(totalVariation)} | 條紋:${crossings} | 規律:${isRegular}`;
 
                 // ==========================================
-                // 波動值防禦邏輯 + 連續影格驗證
+                // 終極絕對防禦邏輯
                 // ==========================================
                 let isSignalValid = false;
 
-                // 條件一：總波動值 (TV) 必須大於 800 (電腦螢幕通常只有 100~300)
-                // 條件二：對比度大於 150
-                // 條件三：條紋至少 3 條
-                // 條件四：整體亮度大於 80
-                if (totalVariation > 800 && contrast > 150 && crossings >= 3 && averageBrightness > 80) {
+                // 條件一：最高亮度必須 >= 245 (只有刺眼強光能造成相機過載，電腦螢幕做不到！)
+                // 條件二：條紋必須是規律的 (isRegular = true)
+                // 條件三：總波動大於 800
+                // 條件四：條紋數 >= 3
+                if (maxB >= 245 && isRegular && totalVariation > 800 && crossings >= 3) {
                     isSignalValid = true;
                 }
 
@@ -162,7 +170,7 @@
                 if (isSignalValid) {
                     validFrameCount++;
                     if (validFrameCount < 3) {
-                        statusDiv.innerText = `🔍 高頻訊號確認中... (${validFrameCount}/3)`;
+                        statusDiv.innerText = `🔍 強光幾何特徵驗證中... (${validFrameCount}/3)`;
                         statusDiv.style.color = "orange";
                     } else {
                         sendData("A");
@@ -170,7 +178,7 @@
                     }
                 } else {
                     validFrameCount = 0; 
-                    if (statusDiv.innerText.includes("確認中")) {
+                    if (statusDiv.innerText.includes("驗證中")) {
                         statusDiv.innerText = "系統就緒，等待掃描...";
                         statusDiv.style.color = "#2c3e50";
                     }
@@ -188,9 +196,6 @@
                 return;
             }
 
-            // ==========================================
-            // LocalStorage 一分鐘防刷機制
-            // ==========================================
             const now = Date.now();
             const storageKey = 'lastCheckIn_' + studentId;
             const lastCheckIn = localStorage.getItem(storageKey);
@@ -206,7 +211,7 @@
             }
 
             isSending = true;
-            statusDiv.innerText = "🔒 防偽驗證通過！正在傳送至雲端...";
+            statusDiv.innerText = "🔒 物理防偽驗證通過！傳送中...";
             statusDiv.style.color = "#007bff";
 
             const fetchUrl = `${API_URL}?student_id=${studentId}&room=${roomCode}`;
@@ -214,7 +219,7 @@
             fetch(fetchUrl)
                 .then(response => response.text())
                 .then(result => {
-                    localStorage.setItem(storageKey, Date.now()); // 成功後寫入永久記憶
+                    localStorage.setItem(storageKey, Date.now());
                     statusDiv.innerText = "🎉 " + result + " (打卡成功)";
                     statusDiv.style.color = "green";
                     setTimeout(() => { 
