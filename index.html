@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (絕對物理封鎖版)</title>
+    <title>Li-Fi 商業級打卡系統 (防爆暖機版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -77,13 +77,24 @@
 
         const COOLDOWN_MS = 60000; 
         let validFrameCount = 0; 
+        let isWarmingUp = false; // 新增：暖機狀態鎖
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", frameRate: { ideal: 30, max: 60 } } })
             .then(function(stream) {
                 video.srcObject = stream;
-                statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
-                statusDiv.style.color = "#007bff";
+                
+                // 【新增護城河】：相機啟動時強制暖機 2 秒，過濾掉開機瞬間的過曝閃爍
+                isWarmingUp = true;
+                statusDiv.innerText = "⏳ 相機暖機中，請稍候...";
+                statusDiv.style.color = "orange";
+                
+                setTimeout(() => {
+                    isWarmingUp = false;
+                    statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
+                    statusDiv.style.color = "#007bff";
+                }, 2000);
+
                 setInterval(analyzeStripes, 50); 
             })
             .catch(function(err) {
@@ -92,6 +103,9 @@
         }
 
         function analyzeStripes() {
+            // 如果還在暖機，或者正在傳送資料，就跳過所有運算
+            if (isWarmingUp || isSending) return;
+
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
@@ -110,18 +124,15 @@
                     brightnessValues.push((data[i] + data[i+1] + data[i+2]) / 3);
                 }
                 
-                // 1. 取得絕對最高亮度與最低亮度
                 let maxB = Math.max(...brightnessValues);
                 let minB = Math.min(...brightnessValues);
                 let contrast = maxB - minB;
                 
-                // 2. 計算總波動值
                 let totalVariation = 0;
                 for (let i = 1; i < brightnessValues.length; i++) {
                     totalVariation += Math.abs(brightnessValues[i] - brightnessValues[i-1]);
                 }
 
-                // 3. 計算條紋與寬度
                 let averageBrightness = brightnessValues.reduce((a, b) => a + b, 0) / brightnessValues.length;
                 let crossings = 0;
                 let lastSign = (brightnessValues[0] >= averageBrightness) ? 1 : -1;
@@ -138,34 +149,31 @@
                     }
                 }
 
-                // 4. 嚴格對稱性驗證 (排除頭尾不完整的條紋)
                 let isRegular = false;
                 if (stripeWidths.length >= 2) {
                     let validWidths = stripeWidths.length > 3 ? stripeWidths.slice(1, -1) : stripeWidths;
                     let minW = Math.min(...validWidths);
                     let maxW = Math.max(...validWidths);
-                    if ((maxW - minW) <= 12) { // 條紋寬度誤差不得超過 12 像素
+                    if ((maxW - minW) <= 12) { 
                         isRegular = true;
                     }
                 }
 
-                // 即時顯示核心數據
-                debugDiv.innerText = `最高亮:${Math.round(maxB)} | 波動:${Math.round(totalVariation)} | 條紋:${crossings} | 規律:${isRegular}`;
+                debugDiv.innerText = `最亮:${Math.round(maxB)} | 對比:${Math.round(contrast)} | 波動:${Math.round(totalVariation)} | 條紋:${crossings}`;
 
                 // ==========================================
-                // 終極絕對防禦邏輯
+                // 無懈可擊的 4 道防爆邏輯
                 // ==========================================
                 let isSignalValid = false;
 
-                // 條件一：最高亮度必須 >= 245 (只有刺眼強光能造成相機過載，電腦螢幕做不到！)
-                // 條件二：條紋必須是規律的 (isRegular = true)
-                // 條件三：總波動大於 800
-                // 條件四：條紋數 >= 3
-                if (maxB >= 245 && isRegular && totalVariation > 800 && crossings >= 3) {
+                // 條件一：最亮必須 >= 245 (物理強光)
+                // 條件二：對比度必須 > 150 (必須有極亮與極暗，排除全白過曝畫面) <-- 剛才漏掉的關鍵！
+                // 條件三：總波動大於 800 (高頻特徵)
+                // 條件四：條紋數 >= 6 (至少要有 6 條黑白相間，排除手抖產生的假條紋)
+                // 條件五：條紋規律 (isRegular)
+                if (maxB >= 245 && contrast > 150 && totalVariation > 800 && crossings >= 6 && isRegular) {
                     isSignalValid = true;
                 }
-
-                if (isSending) return;
 
                 if (isSignalValid) {
                     validFrameCount++;
@@ -179,8 +187,8 @@
                 } else {
                     validFrameCount = 0; 
                     if (statusDiv.innerText.includes("驗證中")) {
-                        statusDiv.innerText = "系統就緒，等待掃描...";
-                        statusDiv.style.color = "#2c3e50";
+                        statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
+                        statusDiv.style.color = "#007bff";
                     }
                 }
             }
@@ -224,8 +232,8 @@
                     statusDiv.style.color = "green";
                     setTimeout(() => { 
                         isSending = false; 
-                        statusDiv.innerText = "系統就緒，等待掃描...";
-                        statusDiv.style.color = "#2c3e50";
+                        statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
+                        statusDiv.style.color = "#007bff";
                     }, 3000); 
                 })
                 .catch(error => {
