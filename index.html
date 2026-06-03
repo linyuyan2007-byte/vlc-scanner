@@ -1,72 +1,4 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (雙軌防偽版)</title>
-    <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
-        .video-container {
-            position: relative;
-            display: inline-block;
-            width: 100%;
-            max-width: 300px;
-            border: 3px solid #2c3e50;
-            border-radius: 10px;
-            overflow: hidden;
-            background: #000;
-        }
-        video { width: 100%; display: block; }
-        
-        .target-box {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 60px;
-            height: 160px;
-            transform: translate(-50%, -50%);
-            border: 2px solid #00ff00;
-            pointer-events: none;
-        }
-        
-        .scan-line {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 2px;
-            height: 140px;
-            transform: translate(-50%, -50%);
-            background-color: rgba(255, 0, 0, 0.7);
-            pointer-events: none;
-        }
-        
-        #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
-        #debug { color: #555; font-size: 12px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; }
-        input { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 220px; }
-        button { padding: 12px 24px; font-size: 16px; background-color: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
-        button:hover { background-color: #27ae60; }
-    </style>
-</head>
-<body>
-    <h2>Li-Fi 光學智慧打卡</h2>
-    <input type="text" id="studentId" placeholder="請先輸入學號 (例: 112001)" />
-    <br><br>
-    
-    <div class="video-container">
-        <video id="video" autoplay playsinline></video>
-        <div class="target-box"></div>
-        <div class="scan-line"></div>
-    </div>
-    <br>
-    
-    <button id="startBtn" onclick="startCamera()">開啟 Li-Fi 掃描</button>
-    <div id="status">系統就緒，等待掃描...</div>
-    <div id="debug">條紋特徵與環境分析中...</div>
-
-    <canvas id="canvas" style="display:none;"></canvas>
-
-    <script>
-        const video = document.getElementById('video');
+const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         const statusDiv = document.getElementById('status');
@@ -75,8 +7,10 @@
         // 確保這是您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
-        // 冷卻時間設定：60,000 毫秒 (1 分鐘)
         const COOLDOWN_MS = 60000; 
+        
+        // 【新增】：連續命中計數器
+        let validFrameCount = 0; 
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", frameRate: { ideal: 30, max: 60 } } })
@@ -144,7 +78,6 @@
                     let validWidths = stripeWidths.slice(1, -1); 
                     let minW = Math.min(...validWidths);
                     let maxW = Math.max(...validWidths);
-                    // 放寬規律性誤差至 10 像素，避免手抖誤判
                     if ((maxW - minW) <= 10) {
                         isRegular = true;
                     }
@@ -153,19 +86,38 @@
                 debugDiv.innerText = `亮度:${Math.round(averageBrightness)} | 對比:${Math.round(contrast)} | 條紋:${crossings} | 規律:${isRegular}`;
 
                 // ==========================================
-                // 雙軌制終極防偽判定邏輯
+                // 嚴密過濾邏輯 + 連續影格驗證
                 // ==========================================
-                if (contrast > 150 && averageBrightness > 80) {
-                    // 【VIP 暴力強光通道】: 3W 加農砲專屬
-                    // 對比度超過 150，筆電螢幕絕對達不到，直接視為合法發射器
-                    if (crossings >= 2) {
+                let isSignalValid = false;
+
+                // 條件一：對比度大於 200 (徹底封殺環境光)
+                // 條件二：條紋大於等於 3 條
+                // 條件三：必須具有規律性 (isRegular)
+                if (contrast > 200 && averageBrightness > 80 && crossings >= 3 && isRegular) {
+                    isSignalValid = true;
+                }
+
+                // 如果正在傳送中，就不要干擾畫面
+                if (isSending) return;
+
+                if (isSignalValid) {
+                    validFrameCount++; // 命中一次，加一分
+                    if (validFrameCount < 3) {
+                        statusDiv.innerText = `🔍 捕捉到特徵，驗證中... (${validFrameCount}/3)`;
+                        statusDiv.style.color = "orange";
+                    } else {
+                        // 連續 3 次完美命中，才是真正的發射器！
                         sendData("A");
+                        validFrameCount = 0; // 重置計數器
                     }
-                } else if (contrast > 60 && averageBrightness > 80 && isRegular) {
-                    // 【一般防偽通道】: 若距離稍遠導致對比度下降 (60~150 之間)
-                    // 則嚴格要求條紋規律性 (isRegular 必須為 true)
-                    if (crossings >= 3 && crossings <= 40) {
-                        sendData("A");
+                } else {
+                    // 只要有一幀不符合（例如手抖移開，或是掃到環境雜訊），計數器瞬間歸零！
+                    validFrameCount = 0; 
+                    
+                    // 保持顯示預設文字 (避免洗掉防刷警告)
+                    if (statusDiv.innerText.includes("驗證中")) {
+                        statusDiv.innerText = "系統就緒，等待掃描...";
+                        statusDiv.style.color = "#2c3e50";
                     }
                 }
             }
@@ -173,19 +125,14 @@
 
         let isSending = false;
         function sendData(roomCode) {
-            if (isSending) return; 
-            
             const studentId = document.getElementById('studentId').value.trim();
             
             if(!studentId) {
-                statusDiv.innerText = "❌ 已對準發射器，但您忘記輸入學號！";
+                statusDiv.innerText = "❌ 驗證通過，但您忘記輸入學號！";
                 statusDiv.style.color = "red";
                 return;
             }
 
-            // ==========================================
-            // 升級：LocalStorage 永久冷卻時間攔截器
-            // ==========================================
             const now = Date.now();
             const storageKey = 'lastCheckIn_' + studentId;
             const lastCheckIn = localStorage.getItem(storageKey);
@@ -200,9 +147,8 @@
                 }
             }
 
-            // 通過所有檢查，鎖定並發送資料
             isSending = true;
-            statusDiv.innerText = "🔒 成功捕捉加密光譜！正在傳送至雲端...";
+            statusDiv.innerText = "🔒 連續驗證通過！正在傳送至雲端...";
             statusDiv.style.color = "#007bff";
 
             const fetchUrl = `${API_URL}?student_id=${studentId}&room=${roomCode}`;
@@ -210,18 +156,17 @@
             fetch(fetchUrl)
                 .then(response => response.text())
                 .then(result => {
-                    // 打卡成功後寫入瀏覽器永久儲存
                     localStorage.setItem(storageKey, Date.now());
-                    
                     statusDiv.innerText = "🎉 " + result + " (打卡成功)";
                     statusDiv.style.color = "green";
-                    setTimeout(() => { isSending = false; }, 3000); 
+                    setTimeout(() => { 
+                        isSending = false; 
+                        statusDiv.innerText = "系統就緒，等待掃描...";
+                        statusDiv.style.color = "#2c3e50";
+                    }, 3000); 
                 })
                 .catch(error => {
                     statusDiv.innerText = "網路連線失敗，請檢查網路";
                     isSending = false;
                 });
         }
-    </script>
-</body>
-</html>
