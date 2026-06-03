@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (防刷升級版)</title>
+    <title>Li-Fi 商業級打卡系統 (雙軌防偽版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -72,10 +72,10 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        // 您的專屬 Google API
+        // 確保這是您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
-        // 冷卻時間設定：1 分鐘
+        // 冷卻時間設定：60,000 毫秒 (1 分鐘)
         const COOLDOWN_MS = 60000; 
 
         function startCamera() {
@@ -116,7 +116,6 @@
                 
                 let averageBrightness = totalBrightness / brightnessValues.length;
                 
-                // 找出這條線上的最亮與最暗，計算對比度
                 let maxB = brightnessValues[0]; 
                 let minB = brightnessValues[0];
                 for(let b of brightnessValues) {
@@ -145,18 +144,27 @@
                     let validWidths = stripeWidths.slice(1, -1); 
                     let minW = Math.min(...validWidths);
                     let maxW = Math.max(...validWidths);
-                    if ((maxW - minW) <= 5) {
+                    // 放寬規律性誤差至 10 像素，避免手抖誤判
+                    if ((maxW - minW) <= 10) {
                         isRegular = true;
                     }
                 }
 
                 debugDiv.innerText = `亮度:${Math.round(averageBrightness)} | 對比:${Math.round(contrast)} | 條紋:${crossings} | 規律:${isRegular}`;
 
-                // 【防偽升級】：將對比度 (contrast) 門檻大幅拉高到 85！
-                // 電腦螢幕的對比度通常只有 20~40，絕對無法通過這關。
-                // 只有 3W 強光 LED 才能製造出 >85 的暴烈黑白對比！
-                if (contrast > 85 && averageBrightness > 90 && isRegular) {
-                    if (crossings >= 14 && crossings <= 30) {
+                // ==========================================
+                // 雙軌制終極防偽判定邏輯
+                // ==========================================
+                if (contrast > 150 && averageBrightness > 80) {
+                    // 【VIP 暴力強光通道】: 3W 加農砲專屬
+                    // 對比度超過 150，筆電螢幕絕對達不到，直接視為合法發射器
+                    if (crossings >= 2) {
+                        sendData("A");
+                    }
+                } else if (contrast > 60 && averageBrightness > 80 && isRegular) {
+                    // 【一般防偽通道】: 若距離稍遠導致對比度下降 (60~150 之間)
+                    // 則嚴格要求條紋規律性 (isRegular 必須為 true)
+                    if (crossings >= 3 && crossings <= 40) {
                         sendData("A");
                     }
                 }
@@ -179,7 +187,6 @@
             // 升級：LocalStorage 永久冷卻時間攔截器
             // ==========================================
             const now = Date.now();
-            // 從瀏覽器的永久儲存區提取該學號的最後打卡時間
             const storageKey = 'lastCheckIn_' + studentId;
             const lastCheckIn = localStorage.getItem(storageKey);
 
@@ -189,10 +196,11 @@
                     let remainSeconds = Math.ceil((COOLDOWN_MS - timePassed) / 1000);
                     statusDiv.innerText = `⏳ 學號 ${studentId} 請勿狂刷！請等待 ${remainSeconds} 秒。`;
                     statusDiv.style.color = "red";
-                    return; // 直接中斷
+                    return; 
                 }
             }
 
+            // 通過所有檢查，鎖定並發送資料
             isSending = true;
             statusDiv.innerText = "🔒 成功捕捉加密光譜！正在傳送至雲端...";
             statusDiv.style.color = "#007bff";
@@ -202,7 +210,7 @@
             fetch(fetchUrl)
                 .then(response => response.text())
                 .then(result => {
-                    // 打卡成功後，將時間寫入瀏覽器永久儲存區
+                    // 打卡成功後寫入瀏覽器永久儲存
                     localStorage.setItem(storageKey, Date.now());
                     
                     statusDiv.innerText = "🎉 " + result + " (打卡成功)";
