@@ -3,52 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>光學智慧防偽打卡系統</title>
+    <title>Li-Fi 高頻條紋防偽打卡系統</title>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f4f6f9; }
+        body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
             position: relative;
             display: inline-block;
             width: 100%;
             max-width: 300px;
-            border: 3px solid #333;
-            border-radius: 8px;
+            border: 3px solid #2c3e50;
+            border-radius: 10px;
             overflow: hidden;
-            background: #000;
         }
         video { width: 100%; display: block; }
+        
+        /* 綠色瞄準框 */
         .target-box {
             position: absolute;
             top: 50%;
             left: 50%;
-            width: 40px;
-            height: 40px;
+            width: 60px;
+            height: 160px;
             transform: translate(-50%, -50%);
-            border: 2px dashed #00ff00;
-            box-shadow: 0 0 15px rgba(0, 255, 0, 0.8);
+            border: 2px solid #00ff00;
             pointer-events: none;
         }
-        #status { font-weight: bold; color: #333; margin-top: 15px; font-size: 18px; }
-        #debug { color: #666; font-size: 12px; margin-top: 10px; font-family: monospace; }
-        input { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 200px; }
-        button { padding: 10px 20px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        button:hover { background-color: #0056b3; }
+        
+        /* 紅色垂直掃描探針線 */
+        .scan-line {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 2px;
+            height: 140px;
+            transform: translate(-50%, -50%);
+            background-color: rgba(255, 0, 0, 0.7);
+            pointer-events: none;
+        }
+        
+        #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 18px; }
+        #debug { color: #555; font-size: 13px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; }
+        input { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 220px; }
+        button { padding: 12px 24px; font-size: 16px; background-color: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #27ae60; }
     </style>
 </head>
 <body>
-    <h2>物聯網光學防偽打卡</h2>
+    <h2>Li-Fi 捲簾快門智慧打卡</h2>
     <input type="text" id="studentId" placeholder="請先輸入學號" />
     <br><br>
     
     <div class="video-container">
         <video id="video" autoplay playsinline></video>
         <div class="target-box"></div>
+        <div class="scan-line"></div>
     </div>
     <br>
     
-    <button id="startBtn" onclick="startCamera()">開啟雷達掃描</button>
+    <button id="startBtn" onclick="startCamera()">開啟 Li-Fi 雷達掃描</button>
     <div id="status">系統就緒，等待掃描...</div>
-    <div id="debug">動態數據偵測中...</div>
+    <div id="debug">條紋特徵分析中...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -59,98 +73,83 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
+        // 請確保這行依然保留您原本的 Google API 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
-
-        // 核心演算法變數
-        let lastState = 0; // 0: 暗, 1: 亮
-        let lastStateChangeTime = Date.now();
-        let signalSequence = []; // 紀錄收到的「滴」與「答」
-        
-        const BRIGHTNESS_THRESHOLD = 248; // 亮度門檻
-        const UNIT_TIME = 200; // 發射端的基礎單位 (毫秒)
-        const ERROR_MARGIN = 120; // 容許誤差時間 (毫秒)
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
             .then(function(stream) {
                 video.srcObject = stream;
-                statusDiv.innerText = "請將綠色準星「鎖定」發射器白光...";
+                statusDiv.innerText = "請用「紅色掃描線」對準恆亮的 LED 燈光";
                 statusDiv.style.color = "#007bff";
-                setInterval(analyzeLight, 30); // 縮短取樣間隔至 30ms 以精準捕捉時間
+                setInterval(analyzeStripes, 40); // 每秒取樣 25 次
             })
             .catch(function(err) {
-                statusDiv.innerText = "無法取用相機：" + err;
+                statusDiv.innerText = "無法啟動相機：" + err;
             });
         }
 
-        function analyzeLight() {
+        function analyzeStripes() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                // 擷取中心點
                 const centerX = canvas.width / 2;
                 const centerY = canvas.height / 2;
-                const imageData = ctx.getImageData(centerX - 4, centerY - 4, 8, 8);
+                
+                // 取樣垂直紅色線上共 140 個像素點
+                const startY = centerY - 70;
+                const scanHeight = 140;
+                const imageData = ctx.getImageData(centerX, startY, 1, scanHeight);
                 const data = imageData.data;
                 
-                let brightness = 0;
+                let brightnessValues = [];
+                let totalBrightness = 0;
+                
+                // 提取灰階亮度
                 for (let i = 0; i < data.length; i += 4) {
-                    brightness += (data[i] + data[i+1] + data[i+2]) / 3; 
+                    let brightness = (data[i] + data[i+1] + data[i+2]) / 3;
+                    brightnessValues.push(brightness);
+                    totalBrightness += brightness;
                 }
-                brightness = brightness / (data.length / 4);
-
-                // 判斷當前瞬間是「亮」還是「暗」
-                let currentState = (brightness > BRIGHTNESS_THRESHOLD) ? 1 : 0;
-                let now = Date.now();
                 
-                // 當狀態發生轉變時（亮變暗，或暗變亮）
-                if (currentState !== lastState) {
-                    let duration = now - lastStateChangeTime;
-                    
-                    if (lastState === 1) {
-                        // 剛才「亮」了多久？
-                        // 如果亮的時間接近 200ms 則是短音(Dot)，接近 600ms 則是長音(Dash)
-                        if (Math.abs(duration - UNIT_TIME) < ERROR_MARGIN) {
-                            signalSequence.push(".");
-                            debugDiv.innerText = "偵測到訊號：【滴】";
-                        } else if (Math.abs(duration - (UNIT_TIME * 3)) < ERROR_MARGIN) {
-                            signalSequence.push("-");
-                            debugDiv.innerText = "偵測到訊號：【答】";
-                        }
-                    }
-                    
-                    // 檢查是否成功拼出字母 'A' (.-)
-                    checkSignalPattern();
-                    
-                    lastState = currentState;
-                    lastStateChangeTime = now;
-                } else {
-                    // 如果暗了太久 (超過 1.5 秒)，代表訊號中斷，重設序列
-                    let idleDuration = now - lastStateChangeTime;
-                    if (currentState === 0 && idleDuration > 1500) {
-                        if(signalSequence.length > 0) {
-                            signalSequence = [];
-                            debugDiv.innerText = "訊號重設，重新等待發射器編碼...";
-                        }
+                let averageBrightness = totalBrightness / brightnessValues.length;
+                
+                // 計算這條線上的亮度對比度 (最大值減最小值)
+                let maxB = Math.min(...brightnessValues); // 修正求極值語法
+                let minB = Math.max(...brightnessValues);
+                for(let b of brightnessValues) {
+                    if(b > maxB) maxB = b;
+                    if(b < minB) minB = b;
+                }
+                let contrast = maxB - minB;
+
+                // 核心：計算明暗橫紋交錯次數 (Crossing Count)
+                let crossings = 0;
+                let lastSign = (brightnessValues[0] >= averageBrightness) ? 1 : -1;
+                
+                for (let i = 1; i < brightnessValues.length; i++) {
+                    let currentSign = (brightnessValues[i] >= averageBrightness) ? 1 : -1;
+                    if (currentSign !== lastSign) {
+                        crossings++;
+                        lastSign = currentSign;
                     }
                 }
-            }
-        }
 
-        function checkSignalPattern() {
-            // 我們只關心最後收到的兩個訊號
-            if (signalSequence.length >= 2) {
-                let len = signalSequence.length;
-                let lastTwo = signalSequence[len-2] + signalSequence[len-1];
-                
-                // 如果最後兩個訊號剛好是 ".-" (也就是摩斯密碼的 A)
-                if (lastTwo === ".-") {
-                    statusDiv.innerText = "🔒 特徵防偽解碼成功！發送打卡數據...";
-                    statusDiv.style.color = "orange";
-                    signalSequence = []; // 清空避免重複觸發
-                    sendData("A");
+                // 偵測數據即時回饋在畫面上
+                debugDiv.innerText = `環境亮度: ${Math.round(averageBrightness)} | 條紋對比: ${Math.round(contrast)} | 斑馬線交錯數: ${crossings}`;
+
+                // 判斷過濾門檻：
+                // 1. 對比度必須高於 35 (代表有清晰的黑白條紋，非平滑光線)
+                // 2. 亮度不能太暗 (averageBrightness > 80)
+                // 3. 斑馬線交錯次數必須在 14 到 30 次之間 (這是 1.2kHz 在該長度下產生的密集條紋特徵)
+                if (contrast > 35 && averageBrightness > 80) {
+                    if (crossings >= 14 && crossings <= 30) {
+                        statusDiv.innerText = "🔒 成功捕捉高頻 Li-Fi 憑證！正在打卡...";
+                        statusDiv.style.color = "#e67e22";
+                        sendData("A");
+                    }
                 }
             }
         }
@@ -162,7 +161,7 @@
             const studentId = document.getElementById('studentId').value;
             
             if(!studentId) {
-                statusDiv.innerText = "❌ 偵測到代碼，但您忘記輸入學號！";
+                statusDiv.innerText = "❌ 條紋比對正確，但請先輸入學號！";
                 statusDiv.style.color = "red";
                 isSending = false;
                 return;
@@ -173,12 +172,12 @@
             fetch(fetchUrl)
                 .then(response => response.text())
                 .then(result => {
-                    statusDiv.innerText = "🎉 " + result + " (已成功記入雲端庫)";
+                    statusDiv.innerText = "🎉 " + result + " (已透過條紋防偽傳入試算表)";
                     statusDiv.style.color = "green";
-                    setTimeout(() => { isSending = false; }, 3000); // 3秒後解鎖，允許下一次打卡
+                    setTimeout(() => { isSending = false; }, 4000); // 4秒防重複打卡鎖
                 })
                 .catch(error => {
-                    statusDiv.innerText = "連線失敗";
+                    statusDiv.innerText = "網路連線失敗";
                     isSending = false;
                 });
         }
