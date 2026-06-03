@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統</title>
+    <title>Li-Fi 商業級打卡系統 (防刷升級版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -75,11 +75,8 @@
         // 您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
-        // ==========================================
-        // 升級二：打卡冷卻時間紀錄器 (記憶體)
-        // ==========================================
-        const checkInHistory = {}; 
-        const COOLDOWN_MS = 60000; // 60,000 毫秒 = 1 分鐘
+        // 冷卻時間設定：1 分鐘
+        const COOLDOWN_MS = 60000; 
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", frameRate: { ideal: 30, max: 60 } } })
@@ -119,17 +116,15 @@
                 
                 let averageBrightness = totalBrightness / brightnessValues.length;
                 
-                let maxB = Math.min(...brightnessValues); 
-                let minB = Math.max(...brightnessValues);
+                // 找出這條線上的最亮與最暗，計算對比度
+                let maxB = brightnessValues[0]; 
+                let minB = brightnessValues[0];
                 for(let b of brightnessValues) {
                     if(b > maxB) maxB = b;
                     if(b < minB) minB = b;
                 }
                 let contrast = maxB - minB;
 
-                // ==========================================
-                // 升級一：計算斑馬線數量與「寬度規律性」
-                // ==========================================
                 let crossings = 0;
                 let lastSign = (brightnessValues[0] >= averageBrightness) ? 1 : -1;
                 let lastCrossingIndex = 0;
@@ -139,28 +134,28 @@
                     let currentSign = (brightnessValues[i] >= averageBrightness) ? 1 : -1;
                     if (currentSign !== lastSign) {
                         crossings++;
-                        stripeWidths.push(i - lastCrossingIndex); // 記錄這條斑馬線的寬度
+                        stripeWidths.push(i - lastCrossingIndex); 
                         lastCrossingIndex = i;
                         lastSign = currentSign;
                     }
                 }
 
-                // 檢驗條紋的粗細是否完全均勻 (排除筆電螢幕雜訊)
                 let isRegular = false;
                 if (stripeWidths.length > 3) {
-                    let validWidths = stripeWidths.slice(1, -1); // 掐頭去尾避免邊緣誤差
+                    let validWidths = stripeWidths.slice(1, -1); 
                     let minW = Math.min(...validWidths);
                     let maxW = Math.max(...validWidths);
-                    // 只要最寬與最窄的條紋相差不到 5 像素，就認定為人造完美規律光
                     if ((maxW - minW) <= 5) {
                         isRegular = true;
                     }
                 }
 
-                debugDiv.innerText = `亮度:${Math.round(averageBrightness)} | 對比:${Math.round(contrast)} | 條紋數:${crossings} | 規律:${isRegular}`;
+                debugDiv.innerText = `亮度:${Math.round(averageBrightness)} | 對比:${Math.round(contrast)} | 條紋:${crossings} | 規律:${isRegular}`;
 
-                // 嚴格過濾條件：高對比(>50) + 亮度夠(>80) + 條紋數吻合(14~30) + 寬度絕對規律
-                if (contrast > 50 && averageBrightness > 80 && isRegular) {
+                // 【防偽升級】：將對比度 (contrast) 門檻大幅拉高到 85！
+                // 電腦螢幕的對比度通常只有 20~40，絕對無法通過這關。
+                // 只有 3W 強光 LED 才能製造出 >85 的暴烈黑白對比！
+                if (contrast > 85 && averageBrightness > 90 && isRegular) {
                     if (crossings >= 14 && crossings <= 30) {
                         sendData("A");
                     }
@@ -181,20 +176,23 @@
             }
 
             // ==========================================
-            // 冷卻時間 (CD) 攔截器
+            // 升級：LocalStorage 永久冷卻時間攔截器
             // ==========================================
             const now = Date.now();
-            if (checkInHistory[studentId]) {
-                const timePassed = now - checkInHistory[studentId];
+            // 從瀏覽器的永久儲存區提取該學號的最後打卡時間
+            const storageKey = 'lastCheckIn_' + studentId;
+            const lastCheckIn = localStorage.getItem(storageKey);
+
+            if (lastCheckIn) {
+                const timePassed = now - parseInt(lastCheckIn);
                 if (timePassed < COOLDOWN_MS) {
                     let remainSeconds = Math.ceil((COOLDOWN_MS - timePassed) / 1000);
-                    statusDiv.innerText = `⏳ 學號 ${studentId} 剛打卡過，請等待 ${remainSeconds} 秒！`;
-                    statusDiv.style.color = "orange";
-                    return; // 直接中斷，不浪費網路發送
+                    statusDiv.innerText = `⏳ 學號 ${studentId} 請勿狂刷！請等待 ${remainSeconds} 秒。`;
+                    statusDiv.style.color = "red";
+                    return; // 直接中斷
                 }
             }
 
-            // 通過所有檢查，鎖定並發送資料
             isSending = true;
             statusDiv.innerText = "🔒 成功捕捉加密光譜！正在傳送至雲端...";
             statusDiv.style.color = "#007bff";
@@ -204,8 +202,8 @@
             fetch(fetchUrl)
                 .then(response => response.text())
                 .then(result => {
-                    // 打卡成功，將該學號與當下時間寫入記憶體簽到簿
-                    checkInHistory[studentId] = Date.now(); 
+                    // 打卡成功後，將時間寫入瀏覽器永久儲存區
+                    localStorage.setItem(storageKey, Date.now());
                     
                     statusDiv.innerText = "🎉 " + result + " (打卡成功)";
                     statusDiv.style.color = "green";
