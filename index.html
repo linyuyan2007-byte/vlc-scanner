@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 高頻條紋防偽打卡系統</title>
+    <title>Li-Fi 商業級打卡系統</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -14,10 +14,10 @@
             border: 3px solid #2c3e50;
             border-radius: 10px;
             overflow: hidden;
+            background: #000;
         }
         video { width: 100%; display: block; }
         
-        /* 綠色瞄準框 */
         .target-box {
             position: absolute;
             top: 50%;
@@ -29,7 +29,6 @@
             pointer-events: none;
         }
         
-        /* 紅色垂直掃描探針線 */
         .scan-line {
             position: absolute;
             top: 50%;
@@ -41,16 +40,16 @@
             pointer-events: none;
         }
         
-        #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 18px; }
-        #debug { color: #555; font-size: 13px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; }
+        #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
+        #debug { color: #555; font-size: 12px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; }
         input { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 220px; }
-        button { padding: 12px 24px; font-size: 16px; background-color: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button { padding: 12px 24px; font-size: 16px; background-color: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
         button:hover { background-color: #27ae60; }
     </style>
 </head>
 <body>
-    <h2>Li-Fi 捲簾快門智慧打卡</h2>
-    <input type="text" id="studentId" placeholder="請先輸入學號" />
+    <h2>Li-Fi 光學智慧打卡</h2>
+    <input type="text" id="studentId" placeholder="請先輸入學號 (例: 112001)" />
     <br><br>
     
     <div class="video-container">
@@ -60,9 +59,9 @@
     </div>
     <br>
     
-    <button id="startBtn" onclick="startCamera()">開啟 Li-Fi 雷達掃描</button>
+    <button id="startBtn" onclick="startCamera()">開啟 Li-Fi 掃描</button>
     <div id="status">系統就緒，等待掃描...</div>
-    <div id="debug">條紋特徵分析中...</div>
+    <div id="debug">條紋特徵與環境分析中...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -73,16 +72,22 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        // 請確保這行依然保留您原本的 Google API 網址
+        // 您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
+        // ==========================================
+        // 升級二：打卡冷卻時間紀錄器 (記憶體)
+        // ==========================================
+        const checkInHistory = {}; 
+        const COOLDOWN_MS = 60000; // 60,000 毫秒 = 1 分鐘
+
         function startCamera() {
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", frameRate: { ideal: 30, max: 60 } } })
             .then(function(stream) {
                 video.srcObject = stream;
-                statusDiv.innerText = "請用「紅色掃描線」對準恆亮的 LED 燈光";
+                statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
                 statusDiv.style.color = "#007bff";
-                setInterval(analyzeStripes, 40); // 每秒取樣 25 次
+                setInterval(analyzeStripes, 50); 
             })
             .catch(function(err) {
                 statusDiv.innerText = "無法啟動相機：" + err;
@@ -98,7 +103,6 @@
                 const centerX = canvas.width / 2;
                 const centerY = canvas.height / 2;
                 
-                // 取樣垂直紅色線上共 140 個像素點
                 const startY = centerY - 70;
                 const scanHeight = 140;
                 const imageData = ctx.getImageData(centerX, startY, 1, scanHeight);
@@ -107,7 +111,6 @@
                 let brightnessValues = [];
                 let totalBrightness = 0;
                 
-                // 提取灰階亮度
                 for (let i = 0; i < data.length; i += 4) {
                     let brightness = (data[i] + data[i+1] + data[i+2]) / 3;
                     brightnessValues.push(brightness);
@@ -116,8 +119,7 @@
                 
                 let averageBrightness = totalBrightness / brightnessValues.length;
                 
-                // 計算這條線上的亮度對比度 (最大值減最小值)
-                let maxB = Math.min(...brightnessValues); // 修正求極值語法
+                let maxB = Math.min(...brightnessValues); 
                 let minB = Math.max(...brightnessValues);
                 for(let b of brightnessValues) {
                     if(b > maxB) maxB = b;
@@ -125,29 +127,41 @@
                 }
                 let contrast = maxB - minB;
 
-                // 核心：計算明暗橫紋交錯次數 (Crossing Count)
+                // ==========================================
+                // 升級一：計算斑馬線數量與「寬度規律性」
+                // ==========================================
                 let crossings = 0;
                 let lastSign = (brightnessValues[0] >= averageBrightness) ? 1 : -1;
+                let lastCrossingIndex = 0;
+                let stripeWidths = [];
                 
                 for (let i = 1; i < brightnessValues.length; i++) {
                     let currentSign = (brightnessValues[i] >= averageBrightness) ? 1 : -1;
                     if (currentSign !== lastSign) {
                         crossings++;
+                        stripeWidths.push(i - lastCrossingIndex); // 記錄這條斑馬線的寬度
+                        lastCrossingIndex = i;
                         lastSign = currentSign;
                     }
                 }
 
-                // 偵測數據即時回饋在畫面上
-                debugDiv.innerText = `環境亮度: ${Math.round(averageBrightness)} | 條紋對比: ${Math.round(contrast)} | 斑馬線交錯數: ${crossings}`;
+                // 檢驗條紋的粗細是否完全均勻 (排除筆電螢幕雜訊)
+                let isRegular = false;
+                if (stripeWidths.length > 3) {
+                    let validWidths = stripeWidths.slice(1, -1); // 掐頭去尾避免邊緣誤差
+                    let minW = Math.min(...validWidths);
+                    let maxW = Math.max(...validWidths);
+                    // 只要最寬與最窄的條紋相差不到 5 像素，就認定為人造完美規律光
+                    if ((maxW - minW) <= 5) {
+                        isRegular = true;
+                    }
+                }
 
-                // 判斷過濾門檻：
-                // 1. 對比度必須高於 35 (代表有清晰的黑白條紋，非平滑光線)
-                // 2. 亮度不能太暗 (averageBrightness > 80)
-                // 3. 斑馬線交錯次數必須在 14 到 30 次之間 (這是 1.2kHz 在該長度下產生的密集條紋特徵)
-                if (contrast > 35 && averageBrightness > 80) {
+                debugDiv.innerText = `亮度:${Math.round(averageBrightness)} | 對比:${Math.round(contrast)} | 條紋數:${crossings} | 規律:${isRegular}`;
+
+                // 嚴格過濾條件：高對比(>50) + 亮度夠(>80) + 條紋數吻合(14~30) + 寬度絕對規律
+                if (contrast > 50 && averageBrightness > 80 && isRegular) {
                     if (crossings >= 14 && crossings <= 30) {
-                        statusDiv.innerText = "🔒 成功捕捉高頻 Li-Fi 憑證！正在打卡...";
-                        statusDiv.style.color = "#e67e22";
                         sendData("A");
                     }
                 }
@@ -157,27 +171,48 @@
         let isSending = false;
         function sendData(roomCode) {
             if (isSending) return; 
-            isSending = true;
-            const studentId = document.getElementById('studentId').value;
+            
+            const studentId = document.getElementById('studentId').value.trim();
             
             if(!studentId) {
-                statusDiv.innerText = "❌ 條紋比對正確，但請先輸入學號！";
+                statusDiv.innerText = "❌ 已對準發射器，但您忘記輸入學號！";
                 statusDiv.style.color = "red";
-                isSending = false;
                 return;
             }
+
+            // ==========================================
+            // 冷卻時間 (CD) 攔截器
+            // ==========================================
+            const now = Date.now();
+            if (checkInHistory[studentId]) {
+                const timePassed = now - checkInHistory[studentId];
+                if (timePassed < COOLDOWN_MS) {
+                    let remainSeconds = Math.ceil((COOLDOWN_MS - timePassed) / 1000);
+                    statusDiv.innerText = `⏳ 學號 ${studentId} 剛打卡過，請等待 ${remainSeconds} 秒！`;
+                    statusDiv.style.color = "orange";
+                    return; // 直接中斷，不浪費網路發送
+                }
+            }
+
+            // 通過所有檢查，鎖定並發送資料
+            isSending = true;
+            statusDiv.innerText = "🔒 成功捕捉加密光譜！正在傳送至雲端...";
+            statusDiv.style.color = "#007bff";
 
             const fetchUrl = `${API_URL}?student_id=${studentId}&room=${roomCode}`;
             
             fetch(fetchUrl)
                 .then(response => response.text())
                 .then(result => {
-                    statusDiv.innerText = "🎉 " + result + " (已透過條紋防偽傳入試算表)";
+                    // 打卡成功，將該學號與當下時間寫入記憶體簽到簿
+                    checkInHistory[studentId] = Date.now(); 
+                    
+                    statusDiv.innerText = "🎉 " + result + " (打卡成功)";
                     statusDiv.style.color = "green";
-                    setTimeout(() => { isSending = false; }, 4000); // 4秒防重複打卡鎖
+                    setTimeout(() => { isSending = false; }, 3000); 
                 })
                 .catch(error => {
-                    statusDiv.innerText = "網路連線失敗";
+                    statusDiv.innerText = "網路連線失敗，請檢查網路";
                     isSending = false;
                 });
         }
