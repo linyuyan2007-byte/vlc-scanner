@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (動態防偽版)</title>
+    <title>Li-Fi 商業級打卡系統 (能量佔比防偽版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -41,7 +41,7 @@
         }
         
         #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
-        #debug { color: #555; font-size: 11px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; font-weight:bold; }
+        #debug { color: #555; font-size: 12px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; font-weight:bold; }
         input { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 220px; }
         button { padding: 12px 24px; font-size: 16px; background-color: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
         button:hover { background-color: #27ae60; }
@@ -72,15 +72,12 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        // 您的專屬 Google API
+        // 確保您的 Google API 網址正確
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
         const COOLDOWN_MS = 60000; 
         let validFrameCount = 0; 
         let isWarmingUp = false; 
-        
-        // 【核心武器】：儲存上一格畫面的亮度，用來抓出靜態作弊者
-        let prevBrightnessValues = []; 
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", frameRate: { ideal: 30, max: 60 } } })
@@ -125,33 +122,27 @@
                     brightnessValues.push((data[i] + data[i+1] + data[i+2]) / 3);
                 }
                 
-                let maxB = Math.max(...brightnessValues);
-                let minB = Math.min(...brightnessValues);
-                let contrast = maxB - minB;
-                
-                // 1. 計算空間總波動
+                // 1. 計算「極端強光」的面積佔比 (Energy Ratio)
+                let brightPixelCount = 0;
+                for (let b of brightnessValues) {
+                    if (b > 220) { // 只有接近純白的像素才算數
+                        brightPixelCount++;
+                    }
+                }
+                let energyRatio = brightPixelCount / brightnessValues.length;
+
+                // 2. 計算總波動
                 let totalVariation = 0;
                 for (let i = 1; i < brightnessValues.length; i++) {
                     totalVariation += Math.abs(brightnessValues[i] - brightnessValues[i-1]);
                 }
 
-                // 2. 【核心防禦】：計算時間維度的「動態閃爍值 (Temporal Change)」
-                let temporalChange = 0;
-                if (prevBrightnessValues.length === brightnessValues.length) {
-                    let totalDiff = 0;
-                    for (let i = 0; i < brightnessValues.length; i++) {
-                        totalDiff += Math.abs(brightnessValues[i] - prevBrightnessValues[i]);
-                    }
-                    temporalChange = totalDiff / brightnessValues.length;
-                }
-                // 將當前數據深拷貝給下一格使用
-                prevBrightnessValues = [...brightnessValues];
-
+                // 3. 計算條紋與規律性
                 let averageBrightness = brightnessValues.reduce((a, b) => a + b, 0) / brightnessValues.length;
                 let crossings = 0;
                 let lastSign = (brightnessValues[0] >= averageBrightness) ? 1 : -1;
-                let lastCrossingIndex = 0;
                 let stripeWidths = [];
+                let lastCrossingIndex = 0;
                 
                 for (let i = 1; i < brightnessValues.length; i++) {
                     let currentSign = (brightnessValues[i] >= averageBrightness) ? 1 : -1;
@@ -173,28 +164,26 @@
                     }
                 }
 
-                // 除錯面板新增「動態」指標
-                debugDiv.innerText = `最亮:${Math.round(maxB)} | 對比:${Math.round(contrast)} | 條紋:${crossings} | 動態:${temporalChange.toFixed(1)}`;
+                // 將「能量比」顯示出來讓您觀察差異
+                debugDiv.innerText = `波動:${Math.round(totalVariation)} | 條紋:${crossings} | 能量:${(energyRatio*100).toFixed(1)}% | 規律:${isRegular}`;
 
                 // ==========================================
-                // 無懈可擊的 5 道防護網 (時空雙重驗證)
+                // 終極防線：發光體積與能量檢測
                 // ==========================================
                 let isSignalValid = false;
 
-                // 條件一：最亮 >= 245
-                // 條件二：對比度 > 150
-                // 條件三：總波動 > 800
-                // 條件四：條紋數 >= 3
-                // 條件五：【終極封殺】動態閃爍值必須 > 5.0！
-                // 靜態的排針、螺絲、印刷字體，動態值通常只有 0.5~1.8，會在這裡被當場擊落！
-                if (maxB >= 245 && contrast > 150 && totalVariation > 800 && crossings >= 3 && isRegular && temporalChange > 5.0) {
+                // 條件一：【新增】能量比必須大於 20% (0.2)
+                // 沒通電的金屬反光，能量比通常不到 5%。只有真正發光的 3W LED 能填滿 20% 以上的純白！
+                // 條件二：總波動大於 800 (確認是高頻黑白相間)
+                // 條件三：條紋 >= 3 且規律
+                if (energyRatio > 0.20 && totalVariation > 800 && crossings >= 3 && isRegular) {
                     isSignalValid = true;
                 }
 
                 if (isSignalValid) {
                     validFrameCount++;
                     if (validFrameCount < 3) {
-                        statusDiv.innerText = `🔍 動態加密特徵驗證中... (${validFrameCount}/3)`;
+                        statusDiv.innerText = `🔍 光學能量驗證中... (${validFrameCount}/3)`;
                         statusDiv.style.color = "orange";
                     } else {
                         sendData("A");
