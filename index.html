@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (絕對鎖死版)</title>
+    <title>Li-Fi 商業級打卡系統 (防震雷達版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -29,7 +29,8 @@
             pointer-events: none;
         }
         
-        .scan-line {
+        /* 中央紅線：負責接收高頻 Li-Fi 訊號 */
+        .scan-line-center {
             position: absolute;
             top: 50%;
             left: 50%;
@@ -38,7 +39,20 @@
             transform: translate(-50%, -50%);
             background-color: rgba(255, 0, 0, 0.9);
             pointer-events: none;
-            box-shadow: 0 0 4px red;
+            box-shadow: 0 0 5px red;
+        }
+
+        /* 邊緣藍線：負責偵測環境是否有人為晃動 */
+        .scan-line-bg {
+            position: absolute;
+            top: 50%;
+            left: 10%;
+            width: 2px;
+            height: 140px;
+            transform: translateY(-50%);
+            background-color: rgba(0, 150, 255, 0.7);
+            pointer-events: none;
+            box-shadow: 0 0 5px blue;
         }
         
         #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
@@ -49,20 +63,21 @@
     </style>
 </head>
 <body>
-    <h2>Li-Fi 示波器級智慧打卡</h2>
+    <h2>Li-Fi 防手震智慧打卡</h2>
     <input type="text" id="studentId" placeholder="請先輸入學號 (例: 112001)" />
     <br><br>
     
     <div class="video-container">
         <video id="video" autoplay playsinline></video>
         <div class="target-box"></div>
-        <div class="scan-line"></div>
+        <div class="scan-line-center"></div>
+        <div class="scan-line-bg"></div>
     </div>
     <br>
     
     <button id="startBtn" onclick="startCamera()">開啟 Li-Fi 掃描</button>
     <div id="status">系統就緒，等待掃描...</div>
-    <div id="debug">波形解碼器分析中...</div>
+    <div id="debug">雙雷達追蹤分析中...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -79,6 +94,10 @@
         const COOLDOWN_MS = 60000; 
         let validFrameCount = 0; 
         let isWarmingUp = false; 
+        
+        // 雙軌記憶體：紀錄上一幀的狀態
+        let prevCenterVals = []; 
+        let prevBgVals = [];
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", frameRate: { ideal: 30, max: 60 } } })
@@ -86,12 +105,12 @@
                 video.srcObject = stream;
                 
                 isWarmingUp = true;
-                statusDiv.innerText = "⏳ 相機暖機與測光中...";
+                statusDiv.innerText = "⏳ 雙雷達校準中...";
                 statusDiv.style.color = "orange";
                 
                 setTimeout(() => {
                     isWarmingUp = false;
-                    statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
+                    statusDiv.innerText = "請將紅線對準發射器，並保持手機穩定";
                     statusDiv.style.color = "#007bff";
                 }, 2000);
 
@@ -110,107 +129,89 @@
                 canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                const centerX = canvas.width / 2;
                 const centerY = canvas.height / 2;
                 const startY = centerY - 70;
                 const scanHeight = 140;
-                const imageData = ctx.getImageData(centerX, startY, 1, scanHeight);
-                const data = imageData.data;
                 
-                let brightnessValues = [];
-                for (let i = 0; i < data.length; i += 4) {
-                    brightnessValues.push((data[i] + data[i+1] + data[i+2]) / 3);
+                // 中央探針 (紅線)：擷取目標訊號
+                const centerX = canvas.width / 2;
+                const imgCenter = ctx.getImageData(centerX, startY, 1, scanHeight).data;
+                
+                // 背景探針 (藍線)：擷取左側環境作為防震參考
+                const bgX = canvas.width * 0.1; 
+                const imgBg = ctx.getImageData(bgX, startY, 1, scanHeight).data;
+                
+                let centerVals = [], bgVals = [];
+                for (let i = 0; i < scanHeight * 4; i += 4) {
+                    centerVals.push((imgCenter[i] + imgCenter[i+1] + imgCenter[i+2]) / 3);
+                    bgVals.push((imgBg[i] + imgBg[i+1] + imgBg[i+2]) / 3);
                 }
                 
-                let maxB = Math.max(...brightnessValues);
-                let minB = Math.min(...brightnessValues);
+                // 1. 計算時間維度的「動態變化量」
+                let centerTemporalDiff = 0; // 中央目標的閃爍程度
+                let bgTemporalDiff = 0;     // 背景環境的晃動程度
+                
+                if (prevCenterVals.length === scanHeight) {
+                    for (let i = 0; i < scanHeight; i++) {
+                        centerTemporalDiff += Math.abs(centerVals[i] - prevCenterVals[i]);
+                        bgTemporalDiff += Math.abs(bgVals[i] - prevBgVals[i]);
+                    }
+                    centerTemporalDiff /= scanHeight; // 求平均單一像素的變化量
+                    bgTemporalDiff /= scanHeight;
+                }
+                
+                prevCenterVals = [...centerVals];
+                prevBgVals = [...bgVals];
+
+                // 2. 擷取中央目標的物理光學特徵
+                let maxB = Math.max(...centerVals);
+                let minB = Math.min(...centerVals);
                 let contrast = maxB - minB;
                 
-                // 【核心一：銳利度檢測】找出像素之間的最大落差 (Gradient)
-                // 發射器是瞬間閃爍，邊緣極度銳利；手震模糊的邊緣是平滑的
-                let maxGradient = 0;
-                for (let i = 1; i < brightnessValues.length; i++) {
-                    let grad = Math.abs(brightnessValues[i] - brightnessValues[i-1]);
-                    if (grad > maxGradient) maxGradient = grad;
-                }
-
-                // 【核心二：數位方波解碼】將灰階轉為純粹的 0 與 1 (高低電位)
-                let midPoint = minB + (contrast / 2); // 找中位數作為閥值
-                let pulses = [];
-                let currentPulseType = brightnessValues[0] > midPoint ? 1 : 0;
-                let currentPulseWidth = 1;
-
-                // 測量每一個「亮帶」與「暗帶」的寬度
-                for (let i = 1; i < brightnessValues.length; i++) {
-                    let type = brightnessValues[i] > midPoint ? 1 : 0;
-                    if (type === currentPulseType) {
-                        currentPulseWidth++;
-                    } else {
-                        pulses.push({ type: currentPulseType, width: currentPulseWidth });
-                        currentPulseType = type;
-                        currentPulseWidth = 1;
-                    }
-                }
-                pulses.push({ type: currentPulseType, width: currentPulseWidth });
-
-                // 移除頭尾被截斷的不完整波形
-                if (pulses.length >= 3) {
-                    pulses = pulses.slice(1, -1);
-                }
-
-                // 【核心三：方波佔空比與均勻度審查】
-                let isPerfectWaveform = false;
-                let dutyCycleRatio = 0;
+                let avgCenter = centerVals.reduce((a, b) => a + b, 0) / scanHeight;
+                let crossings = 0;
+                let lastSign = (centerVals[0] >= avgCenter) ? 1 : -1;
                 
-                if (pulses.length >= 4) { // 至少要有完整的 4 個亮暗變化
-                    let maxW = 0, minW = 999;
-                    let brightSum = 0, brightCount = 0;
-                    let darkSum = 0, darkCount = 0;
-
-                    for (let p of pulses) {
-                        if (p.width > maxW) maxW = p.width;
-                        if (p.width < minW) minW = p.width;
-                        if (p.type === 1) { brightSum += p.width; brightCount++; }
-                        else { darkSum += p.width; darkCount++; }
-                    }
-
-                    // 1. 計算所有條紋的最粗與最細差異
-                    let widthDiff = maxW - minW;
-                    
-                    // 2. 計算 50/50 佔空比 (亮帶平均寬度 vs 暗帶平均寬度)
-                    let avgBright = brightCount > 0 ? (brightSum / brightCount) : 0;
-                    let avgDark = darkCount > 0 ? (darkSum / darkCount) : 0;
-                    
-                    if (avgDark > 0) {
-                        dutyCycleRatio = avgBright / avgDark;
-                    }
-
-                    // 【絕殺判定】：寬度誤差 <= 8 且 亮暗比例對稱 (0.5 到 2.0 之間)
-                    // 手晃產生的殘影寬度誤差絕對破 20，且佔空比極度扭曲
-                    if (widthDiff <= 8 && dutyCycleRatio > 0.5 && dutyCycleRatio < 2.0) {
-                        isPerfectWaveform = true;
+                for (let i = 1; i < scanHeight; i++) {
+                    let currentSign = (centerVals[i] >= avgCenter) ? 1 : -1;
+                    if (currentSign !== lastSign) {
+                        crossings++;
+                        lastSign = currentSign;
                     }
                 }
 
-                // 將軍事級的數據印出來讓您觀察
-                debugDiv.innerText = `最亮:${Math.round(maxB)} | 銳利度:${Math.round(maxGradient)} | 條紋:${pulses.length} | 完美方波:${isPerfectWaveform}`;
+                debugDiv.innerText = `晃動:${Math.round(bgTemporalDiff)} | 閃爍:${Math.round(centerTemporalDiff)} | 亮度:${Math.round(maxB)} | 對比:${Math.round(contrast)}`;
 
                 // ==========================================
-                // 無堅不摧的四重物理鎖
+                // 軍工級防手震判定邏輯
                 // ==========================================
+                let isStable = bgTemporalDiff < 18; // 【防震鎖】：背景變化量超過 18，代表正在劇烈搖晃手機
+                let isFlashing = centerTemporalDiff > 25; // 目標必須具備高度閃爍特徵
                 let isSignalValid = false;
 
-                // 1. 物理亮度過載 (maxB > 240) -> 阻擋室內暗部環境
-                // 2. 頻閃銳利邊緣 (maxGradient > 80) -> 阻擋任何手搖產生的殘影模糊
-                // 3. 完美數位方波 (isPerfectWaveform === true) -> 阻擋任何隨機線條或不對稱的幾何圖形
-                if (maxB > 240 && maxGradient > 80 && isPerfectWaveform === true) {
+                if (!isStable) {
+                    // 如果藍色探針發現畫面在晃動，立刻歸零並警告
+                    validFrameCount = 0;
+                    if (!statusDiv.innerText.includes("晃動")) {
+                        statusDiv.innerText = "⚠️ 偵測到劇烈晃動，請保持手機穩定！";
+                        statusDiv.style.color = "red";
+                    }
+                    return; // 提早結束，不進行後續判斷
+                }
+
+                // 如果環境穩定 (沒搖手機)，再來檢查紅線對準的是不是發射器
+                // 條件一：紅線區域強烈閃爍
+                // 條件二：亮度過載 (> 230)
+                // 條件三：具備黑白斑馬線的對比度 (> 100)
+                // 條件四：至少有 2 條以上的斑馬線
+                if (isFlashing && maxB > 230 && contrast > 100 && crossings >= 2) {
                     isSignalValid = true;
                 }
 
                 if (isSignalValid) {
                     validFrameCount++;
                     if (validFrameCount < 3) {
-                        statusDiv.innerText = `🔍 數位方波解碼中... (${validFrameCount}/3)`;
+                        statusDiv.innerText = `🔍 目標穩定，防偽鎖定中... (${validFrameCount}/3)`;
                         statusDiv.style.color = "orange";
                     } else {
                         sendData("A");
@@ -218,8 +219,8 @@
                     }
                 } else {
                     validFrameCount = 0; 
-                    if (statusDiv.innerText.includes("解碼中")) {
-                        statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
+                    if (statusDiv.innerText.includes("鎖定中") || statusDiv.innerText.includes("穩定")) {
+                        statusDiv.innerText = "請將紅線對準發射器，並保持手機穩定";
                         statusDiv.style.color = "#007bff";
                     }
                 }
@@ -251,7 +252,7 @@
             }
 
             isSending = true;
-            statusDiv.innerText = "🔒 示波器級特徵鎖定！傳送中...";
+            statusDiv.innerText = "🔒 雙雷達安全驗證通過！傳送中...";
             statusDiv.style.color = "#007bff";
 
             const fetchUrl = `${API_URL}?student_id=${studentId}&room=${roomCode}`;
@@ -264,7 +265,7 @@
                     statusDiv.style.color = "green";
                     setTimeout(() => { 
                         isSending = false; 
-                        statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
+                        statusDiv.innerText = "請將紅線對準發射器，並保持手機穩定";
                         statusDiv.style.color = "#007bff";
                     }, 3000); 
                 })
