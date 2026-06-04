@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (防震雷達版)</title>
+    <title>Li-Fi 商業級打卡系統 (軍工級防偽版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -29,7 +29,6 @@
             pointer-events: none;
         }
         
-        /* 中央紅線：負責接收高頻 Li-Fi 訊號 */
         .scan-line-center {
             position: absolute;
             top: 50%;
@@ -41,19 +40,6 @@
             pointer-events: none;
             box-shadow: 0 0 5px red;
         }
-
-        /* 邊緣藍線：負責偵測環境是否有人為晃動 */
-        .scan-line-bg {
-            position: absolute;
-            top: 50%;
-            left: 10%;
-            width: 2px;
-            height: 140px;
-            transform: translateY(-50%);
-            background-color: rgba(0, 150, 255, 0.7);
-            pointer-events: none;
-            box-shadow: 0 0 5px blue;
-        }
         
         #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
         #debug { color: #555; font-size: 11px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; font-weight:bold; }
@@ -63,7 +49,7 @@
     </style>
 </head>
 <body>
-    <h2>Li-Fi 防手震智慧打卡</h2>
+    <h2>Li-Fi 光學智慧打卡</h2>
     <input type="text" id="studentId" placeholder="請先輸入學號 (例: 112001)" />
     <br><br>
     
@@ -71,13 +57,12 @@
         <video id="video" autoplay playsinline></video>
         <div class="target-box"></div>
         <div class="scan-line-center"></div>
-        <div class="scan-line-bg"></div>
     </div>
     <br>
     
     <button id="startBtn" onclick="startCamera()">開啟 Li-Fi 掃描</button>
     <div id="status">系統就緒，等待掃描...</div>
-    <div id="debug">雙雷達追蹤分析中...</div>
+    <div id="debug">核心演算法分析中...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -88,16 +73,14 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        // 確保這是您的專屬 Google API
+        // 確保這是您的專屬 Google API 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
         const COOLDOWN_MS = 60000; 
         let validFrameCount = 0; 
         let isWarmingUp = false; 
         
-        // 雙軌記憶體：紀錄上一幀的狀態
         let prevCenterVals = []; 
-        let prevBgVals = [];
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", frameRate: { ideal: 30, max: 60 } } })
@@ -105,12 +88,12 @@
                 video.srcObject = stream;
                 
                 isWarmingUp = true;
-                statusDiv.innerText = "⏳ 雙雷達校準中...";
+                statusDiv.innerText = "⏳ 系統高精密光學自檢中...";
                 statusDiv.style.color = "orange";
                 
                 setTimeout(() => {
                     isWarmingUp = false;
-                    statusDiv.innerText = "請將紅線對準發射器，並保持手機穩定";
+                    statusDiv.innerText = "請將紅色線精準對準發射器 LED...";
                     statusDiv.style.color = "#007bff";
                 }, 2000);
 
@@ -133,37 +116,25 @@
                 const startY = centerY - 70;
                 const scanHeight = 140;
                 
-                // 中央探針 (紅線)：擷取目標訊號
                 const centerX = canvas.width / 2;
                 const imgCenter = ctx.getImageData(centerX, startY, 1, scanHeight).data;
                 
-                // 背景探針 (藍線)：擷取左側環境作為防震參考
-                const bgX = canvas.width * 0.1; 
-                const imgBg = ctx.getImageData(bgX, startY, 1, scanHeight).data;
-                
-                let centerVals = [], bgVals = [];
+                let centerVals = [];
                 for (let i = 0; i < scanHeight * 4; i += 4) {
                     centerVals.push((imgCenter[i] + imgCenter[i+1] + imgCenter[i+2]) / 3);
-                    bgVals.push((imgBg[i] + imgBg[i+1] + imgBg[i+2]) / 3);
                 }
                 
-                // 1. 計算時間維度的「動態變化量」
-                let centerTemporalDiff = 0; // 中央目標的閃爍程度
-                let bgTemporalDiff = 0;     // 背景環境的晃動程度
-                
+                // 1. 計算時間動態閃爍量
+                let centerTemporalDiff = 0;
                 if (prevCenterVals.length === scanHeight) {
                     for (let i = 0; i < scanHeight; i++) {
                         centerTemporalDiff += Math.abs(centerVals[i] - prevCenterVals[i]);
-                        bgTemporalDiff += Math.abs(bgVals[i] - prevBgVals[i]);
                     }
-                    centerTemporalDiff /= scanHeight; // 求平均單一像素的變化量
-                    bgTemporalDiff /= scanHeight;
+                    centerTemporalDiff /= scanHeight;
                 }
-                
                 prevCenterVals = [...centerVals];
-                prevBgVals = [...bgVals];
 
-                // 2. 擷取中央目標的物理光學特徵
+                // 2. 擷取極端光學特徵
                 let maxB = Math.max(...centerVals);
                 let minB = Math.min(...centerVals);
                 let contrast = maxB - minB;
@@ -171,47 +142,59 @@
                 let avgCenter = centerVals.reduce((a, b) => a + b, 0) / scanHeight;
                 let crossings = 0;
                 let lastSign = (centerVals[0] >= avgCenter) ? 1 : -1;
+                let lastCrossingIndex = 0;
+                let stripeWidths = [];
                 
                 for (let i = 1; i < scanHeight; i++) {
                     let currentSign = (centerVals[i] >= avgCenter) ? 1 : -1;
                     if (currentSign !== lastSign) {
                         crossings++;
+                        stripeWidths.push(i - lastCrossingIndex); // 記錄每一條橫紋的像素寬度
+                        lastCrossingIndex = i;
                         lastSign = currentSign;
                     }
                 }
 
-                debugDiv.innerText = `晃動:${Math.round(bgTemporalDiff)} | 閃爍:${Math.round(centerTemporalDiff)} | 亮度:${Math.round(maxB)} | 對比:${Math.round(contrast)}`;
-
                 // ==========================================
-                // 軍工級防手震判定邏輯
+                // 【核心神盾】：數學幾何等距審查 (封殺所有雜訊)
                 // ==========================================
-                let isStable = bgTemporalDiff < 18; // 【防震鎖】：背景變化量超過 18，代表正在劇烈搖晃手機
-                let isFlashing = centerTemporalDiff > 25; // 目標必須具備高度閃爍特徵
-                let isSignalValid = false;
+                let isPerfectSymmetry = false;
+                let widthVariance = 999;
 
-                if (!isStable) {
-                    // 如果藍色探針發現畫面在晃動，立刻歸零並警告
-                    validFrameCount = 0;
-                    if (!statusDiv.innerText.includes("晃動")) {
-                        statusDiv.innerText = "⚠️ 偵測到劇烈晃動，請保持手機穩定！";
-                        statusDiv.style.color = "red";
+                if (stripeWidths.length >= 2) {
+                    // 如果條紋大於 3 條，掐頭去尾避免邊緣不完整造成的誤差
+                    let validWidths = stripeWidths.length > 3 ? stripeWidths.slice(1, -1) : stripeWidths;
+                    
+                    let minW = Math.min(...validWidths);
+                    let maxW = Math.max(...validWidths);
+                    widthVariance = maxW - minW; // 計算最粗和最細條紋的差距
+
+                    // 絕殺令：所有條紋的粗細誤差不得超過 4 個像素！
+                    // 筆電邊框、文字殘影的誤差隨便都破 15~30 像素，在此會被瞬間秒殺
+                    if (widthVariance <= 4) {
+                        isPerfectSymmetry = true;
                     }
-                    return; // 提早結束，不進行後續判斷
                 }
 
-                // 如果環境穩定 (沒搖手機)，再來檢查紅線對準的是不是發射器
-                // 條件一：紅線區域強烈閃爍
-                // 條件二：亮度過載 (> 230)
-                // 條件三：具備黑白斑馬線的對比度 (> 100)
-                // 條件四：至少有 2 條以上的斑馬線
-                if (isFlashing && maxB > 230 && contrast > 100 && crossings >= 2) {
+                debugDiv.innerText = `最亮:${Math.round(maxB)} | 對比:${Math.round(contrast)} | 閃爍:${Math.round(centerTemporalDiff)} | 寬度差:${widthVariance}像素`;
+
+                // ==========================================
+                // 地獄級四重篩選條件
+                // ==========================================
+                let isSignalValid = false;
+
+                // 條件一：最亮點必須 > 240 (只有 3W LED 強光能做到)
+                // 條件二：對比度必須 > 180 (必須具備極亮與極暗，排除柔和反光)
+                // 條件三：閃爍變異量 > 15 (發射器特有的滾動閃爍)
+                // 條件四：完美幾何等距 (isPerfectSymmetry === true) <-- 徹底阻擋亂晃
+                if (maxB > 240 && contrast > 180 && centerTemporalDiff > 15 && isPerfectSymmetry === true) {
                     isSignalValid = true;
                 }
 
                 if (isSignalValid) {
                     validFrameCount++;
                     if (validFrameCount < 3) {
-                        statusDiv.innerText = `🔍 目標穩定，防偽鎖定中... (${validFrameCount}/3)`;
+                        statusDiv.innerText = `🔍 物理光柵幾何比對中... (${validFrameCount}/3)`;
                         statusDiv.style.color = "orange";
                     } else {
                         sendData("A");
@@ -219,8 +202,8 @@
                     }
                 } else {
                     validFrameCount = 0; 
-                    if (statusDiv.innerText.includes("鎖定中") || statusDiv.innerText.includes("穩定")) {
-                        statusDiv.innerText = "請將紅線對準發射器，並保持手機穩定";
+                    if (statusDiv.innerText.includes("幾何比對")) {
+                        statusDiv.innerText = "請用「紅色掃描線」對準發射器 LED...";
                         statusDiv.style.color = "#007bff";
                     }
                 }
@@ -252,7 +235,7 @@
             }
 
             isSending = true;
-            statusDiv.innerText = "🔒 雙雷達安全驗證通過！傳送中...";
+            statusDiv.innerText = "🔒 軍工級物理防偽通過！傳送中...";
             statusDiv.style.color = "#007bff";
 
             const fetchUrl = `${API_URL}?student_id=${studentId}&room=${roomCode}`;
@@ -265,7 +248,7 @@
                     statusDiv.style.color = "green";
                     setTimeout(() => { 
                         isSending = false; 
-                        statusDiv.innerText = "請將紅線對準發射器，並保持手機穩定";
+                        statusDiv.innerText = "請用「紅色掃描線」對準發射器 LED...";
                         statusDiv.style.color = "#007bff";
                     }, 3000); 
                 })
