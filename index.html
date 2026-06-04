@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (軍工級防偽版)</title>
+    <title>Li-Fi 商業級打卡系統 (不對稱密碼版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -29,7 +29,7 @@
             pointer-events: none;
         }
         
-        .scan-line-center {
+        .scan-line {
             position: absolute;
             top: 50%;
             left: 50%;
@@ -49,20 +49,20 @@
     </style>
 </head>
 <body>
-    <h2>Li-Fi 光學智慧打卡</h2>
+    <h2>Li-Fi 密碼解碼智慧打卡</h2>
     <input type="text" id="studentId" placeholder="請先輸入學號 (例: 112001)" />
     <br><br>
     
     <div class="video-container">
         <video id="video" autoplay playsinline></video>
         <div class="target-box"></div>
-        <div class="scan-line-center"></div>
+        <div class="scan-line"></div>
     </div>
     <br>
     
     <button id="startBtn" onclick="startCamera()">開啟 Li-Fi 掃描</button>
     <div id="status">系統就緒，等待掃描...</div>
-    <div id="debug">核心演算法分析中...</div>
+    <div id="debug">密碼鎖分析中...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -73,13 +73,12 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        // 確保這是您的專屬 Google API 網址
+        // 確保這是您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
         const COOLDOWN_MS = 60000; 
         let validFrameCount = 0; 
         let isWarmingUp = false; 
-        
         let prevCenterVals = []; 
 
         function startCamera() {
@@ -88,12 +87,12 @@
                 video.srcObject = stream;
                 
                 isWarmingUp = true;
-                statusDiv.innerText = "⏳ 系統高精密光學自檢中...";
+                statusDiv.innerText = "⏳ 光學解碼安全自檢中...";
                 statusDiv.style.color = "orange";
                 
                 setTimeout(() => {
                     isWarmingUp = false;
-                    statusDiv.innerText = "請將紅色線精準對準發射器 LED...";
+                    statusDiv.innerText = "請將紅線對準發射器 LED...";
                     statusDiv.style.color = "#007bff";
                 }, 2000);
 
@@ -124,7 +123,7 @@
                     centerVals.push((imgCenter[i] + imgCenter[i+1] + imgCenter[i+2]) / 3);
                 }
                 
-                // 1. 計算時間動態閃爍量
+                // 1. 計算時間維度動態閃爍量
                 let centerTemporalDiff = 0;
                 if (prevCenterVals.length === scanHeight) {
                     for (let i = 0; i < scanHeight; i++) {
@@ -134,67 +133,90 @@
                 }
                 prevCenterVals = [...centerVals];
 
-                // 2. 擷取極端光學特徵
+                // 2. 擷取基礎物理特徵
                 let maxB = Math.max(...centerVals);
                 let minB = Math.min(...centerVals);
                 let contrast = maxB - minB;
                 
-                let avgCenter = centerVals.reduce((a, b) => a + b, 0) / scanHeight;
-                let crossings = 0;
-                let lastSign = (centerVals[0] >= avgCenter) ? 1 : -1;
-                let lastCrossingIndex = 0;
-                let stripeWidths = [];
+                // 3. 數位脈衝寬度解碼
+                let midPoint = minB + (contrast / 2);
+                let pulses = [];
+                let currentPulseType = centerVals[0] > midPoint ? 1 : 0;
+                let currentPulseWidth = 1;
                 
                 for (let i = 1; i < scanHeight; i++) {
-                    let currentSign = (centerVals[i] >= avgCenter) ? 1 : -1;
-                    if (currentSign !== lastSign) {
-                        crossings++;
-                        stripeWidths.push(i - lastCrossingIndex); // 記錄每一條橫紋的像素寬度
-                        lastCrossingIndex = i;
-                        lastSign = currentSign;
+                    let type = centerVals[i] > midPoint ? 1 : 0;
+                    if (type === currentPulseType) {
+                        currentPulseWidth++;
+                    } else {
+                        pulses.push({ type: currentPulseType, width: currentPulseWidth });
+                        currentPulseType = type;
+                        currentPulseWidth = 1;
                     }
+                }
+                pulses.push({ type: currentPulseType, width: currentPulseWidth });
+
+                // 掐頭去尾避免邊緣不完整造成的誤差
+                if (pulses.length >= 3) {
+                    pulses = pulses.slice(1, -1);
+                }
+
+                // 分離亮帶 (1) 與暗帶 (0) 的寬度
+                let darkWidths = [];
+                let brightWidths = [];
+                for (let p of pulses) {
+                    if (p.type === 0) darkWidths.push(p.width);
+                    if (p.type === 1) brightWidths.push(p.width);
                 }
 
                 // ==========================================
-                // 【核心神盾】：數學幾何等距審查 (封殺所有雜訊)
+                // 【核心密碼鎖】：黑白非對稱比例審查
                 // ==========================================
-                let isPerfectSymmetry = false;
-                let widthVariance = 999;
+                let isSignatureMatched = false;
+                let ratioReport = 0;
+                let darkDiff = 99;
+                let brightDiff = 99;
 
-                if (stripeWidths.length >= 2) {
-                    // 如果條紋大於 3 條，掐頭去尾避免邊緣不完整造成的誤差
-                    let validWidths = stripeWidths.length > 3 ? stripeWidths.slice(1, -1) : stripeWidths;
+                if (darkWidths.length >= 2 && brightWidths.length >= 1) {
+                    let avgDark = darkWidths.reduce((a, b) => a + b, 0) / darkWidths.length;
+                    let avgBright = brightWidths.reduce((a, b) => a + b, 0) / brightWidths.length;
                     
-                    let minW = Math.min(...validWidths);
-                    let maxW = Math.max(...validWidths);
-                    widthVariance = maxW - minW; // 計算最粗和最細條紋的差距
+                    // 計算黑白比例 (預期要是 3.0 倍)
+                    ratioReport = avgDark / avgBright;
+                    
+                    // 檢查各自的等距規律性
+                    darkDiff = Math.max(...darkWidths) - Math.min(...darkWidths);
+                    brightDiff = Math.max(...brightWidths) - Math.min(...brightWidths);
 
-                    // 絕殺令：所有條紋的粗細誤差不得超過 4 個像素！
-                    // 筆電邊框、文字殘影的誤差隨便都破 15~30 像素，在此會被瞬間秒殺
-                    if (widthVariance <= 4) {
-                        isPerfectSymmetry = true;
+                    // 終極防偽關卡：
+                    // 1. 比例必須落在 2.3 ~ 3.7 之間（嚴格鎖死 3 倍特徵）
+                    // 2. 黑條紋之間的誤差不得超過 4 像素
+                    // 3. 白條紋之間的誤差不得超過 4 像素
+                    if (ratioReport >= 2.3 && ratioReport <= 3.7 && darkDiff <= 4 && brightDiff <= 4) {
+                        isSignatureMatched = true;
                     }
                 }
 
-                debugDiv.innerText = `最亮:${Math.round(maxB)} | 對比:${Math.round(contrast)} | 閃爍:${Math.round(centerTemporalDiff)} | 寬度差:${widthVariance}像素`;
+                debugDiv.innerText = `最亮:${Math.round(maxB)} | 閃爍:${Math.round(centerTemporalDiff)} | 寬度比:${ratioReport.toFixed(1)}倍 | 密碼鎖:${isSignatureMatched}`;
 
                 // ==========================================
-                // 地獄級四重篩選條件
+                // 軍工級绝对鎖死條件
                 // ==========================================
                 let isSignalValid = false;
 
-                // 條件一：最亮點必須 > 240 (只有 3W LED 強光能做到)
-                // 條件二：對比度必須 > 180 (必須具備極亮與極暗，排除柔和反光)
-                // 條件三：閃爍變異量 > 15 (發射器特有的滾動閃爍)
-                // 條件四：完美幾何等距 (isPerfectSymmetry === true) <-- 徹底阻擋亂晃
-                if (maxB > 240 && contrast > 180 && centerTemporalDiff > 15 && isPerfectSymmetry === true) {
+                // 條件一：最亮 > 240 (防低光源雜訊)
+                // 條件二：對比度 > 150 (防柔和面光源)
+                // 條件三：閃爍變異量 > 10 (防完全靜態物體)
+                // 條件四：【絕殺】非對稱物理密碼鎖必須解鎖成功
+                if (maxB > 240 && contrast > 150 && centerTemporalDiff > 10 && isSignatureMatched === true) {
                     isSignalValid = true;
                 }
 
                 if (isSignalValid) {
                     validFrameCount++;
-                    if (validFrameCount < 3) {
-                        statusDiv.innerText = `🔍 物理光柵幾何比對中... (${validFrameCount}/3)`;
+                    // 連續 5 影格 (約 0.25 秒) 完美維持 3 倍比例才放行！手震晃動絕對不可能連續 5 次命中這個黃金比例！
+                    if (validFrameCount < 5) {
+                        statusDiv.innerText = `🔒 光學密碼解鎖中... (${validFrameCount}/5)`;
                         statusDiv.style.color = "orange";
                     } else {
                         sendData("A");
@@ -202,7 +224,7 @@
                     }
                 } else {
                     validFrameCount = 0; 
-                    if (statusDiv.innerText.includes("幾何比對")) {
+                    if (statusDiv.innerText.includes("解鎖中")) {
                         statusDiv.innerText = "請用「紅色掃描線」對準發射器 LED...";
                         statusDiv.style.color = "#007bff";
                     }
@@ -235,7 +257,7 @@
             }
 
             isSending = true;
-            statusDiv.innerText = "🔒 軍工級物理防偽通過！傳送中...";
+            statusDiv.innerText = "🎉 密碼密鑰比對成功！打卡傳送中...";
             statusDiv.style.color = "#007bff";
 
             const fetchUrl = `${API_URL}?student_id=${studentId}&room=${roomCode}`;
