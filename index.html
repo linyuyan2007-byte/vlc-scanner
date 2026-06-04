@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (雙探針防偽版)</title>
+    <title>Li-Fi 商業級打卡系統 (時序防偽版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -29,19 +29,17 @@
             pointer-events: none;
         }
         
-        /* 升級為左右雙雷射探針 */
-        .scan-line-left, .scan-line-right {
+        .scan-line {
             position: absolute;
             top: 50%;
+            left: 50%;
             width: 2px;
             height: 140px;
-            background-color: rgba(255, 0, 0, 0.8);
-            transform: translateY(-50%);
+            transform: translate(-50%, -50%);
+            background-color: rgba(255, 0, 0, 0.7);
             pointer-events: none;
-            box-shadow: 0 0 5px red;
+            box-shadow: 0 0 4px red;
         }
-        .scan-line-left { left: calc(50% - 15px); }
-        .scan-line-right { left: calc(50% + 15px); }
         
         #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
         #debug { color: #555; font-size: 11px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; font-weight:bold; }
@@ -58,14 +56,13 @@
     <div class="video-container">
         <video id="video" autoplay playsinline></video>
         <div class="target-box"></div>
-        <div class="scan-line-left"></div>
-        <div class="scan-line-right"></div>
+        <div class="scan-line"></div>
     </div>
     <br>
     
     <button id="startBtn" onclick="startCamera()">開啟 Li-Fi 掃描</button>
     <div id="status">系統就緒，等待掃描...</div>
-    <div id="debug">雙探針立體分析中...</div>
+    <div id="debug">核心演算法分析中...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -76,12 +73,15 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        // 確保您的 Google API 網址正確
+        // 確保這是您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
 
         const COOLDOWN_MS = 60000; 
         let validFrameCount = 0; 
         let isWarmingUp = false; 
+        
+        // 【核心記憶體】：紀錄上一幀的亮度，用來捕捉動態相位漂移
+        let prevBrightnessValues = []; 
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", frameRate: { ideal: 30, max: 60 } } })
@@ -94,7 +94,7 @@
                 
                 setTimeout(() => {
                     isWarmingUp = false;
-                    statusDiv.innerText = "請將發射器置於「雙紅色探針」之間...";
+                    statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
                     statusDiv.style.color = "#007bff";
                 }, 2000);
 
@@ -115,73 +115,70 @@
                 
                 const centerX = canvas.width / 2;
                 const centerY = canvas.height / 2;
+                
                 const startY = centerY - 70;
                 const scanHeight = 140;
+                const imageData = ctx.getImageData(centerX, startY, 1, scanHeight);
+                const data = imageData.data;
                 
-                // 擷取左邊探針 (X - 15) 的影像數據
-                const imgLeft = ctx.getImageData(centerX - 15, startY, 1, scanHeight).data;
-                // 擷取右邊探針 (X + 15) 的影像數據
-                const imgRight = ctx.getImageData(centerX + 15, startY, 1, scanHeight).data;
-                
-                let bLeft = [], bRight = [];
-                let spatialDiff = 0; // 左右兩側的差異度
-                let totalVariation = 0;
-                let maxB = 0;
-                let minB = 255;
-                
-                for (let i = 0; i < scanHeight; i++) {
-                    let idx = i * 4;
-                    let l = (imgLeft[idx] + imgLeft[idx+1] + imgLeft[idx+2]) / 3;
-                    let r = (imgRight[idx] + imgRight[idx+1] + imgRight[idx+2]) / 3;
-                    
-                    bLeft.push(l);
-                    bRight.push(r);
-                    
-                    // 核心1：計算左右兩條線在同一個水平位置的亮度差異
-                    spatialDiff += Math.abs(l - r);
-                    
-                    if (l > maxB) maxB = l;
-                    if (l < minB) minB = l;
-                    if (i > 0) totalVariation += Math.abs(bLeft[i] - bLeft[i-1]);
+                let brightnessValues = [];
+                for (let i = 0; i < data.length; i += 4) {
+                    brightnessValues.push((data[i] + data[i+1] + data[i+2]) / 3);
                 }
                 
-                let avgSpatialDiff = spatialDiff / scanHeight;
-                let averageBrightness = bLeft.reduce((a, b) => a + b, 0) / scanHeight;
+                let maxB = Math.max(...brightnessValues);
+                let minB = Math.min(...brightnessValues);
+                let contrast = maxB - minB;
                 
-                // 計算條紋數 (以左側為準)
+                // ==========================================
+                // 【核心算法一】：計算時序相位變異（前後兩影格相減）
+                // ==========================================
+                let flickerPixelCount = 0;
+                if (prevBrightnessValues.length === brightnessValues.length) {
+                    for (let i = 0; i < brightnessValues.length; i++) {
+                        // 如果該像素點在 50 毫秒內，明暗度變化超過 70 單位
+                        if (Math.abs(brightnessValues[i] - prevBrightnessValues[i]) > 70) {
+                            flickerPixelCount++;
+                        }
+                    }
+                }
+                // 更新記憶體，供下一幀比對
+                prevBrightnessValues = [...brightnessValues];
+
+                // 計算條紋數量
+                let averageBrightness = brightnessValues.reduce((a, b) => a + b, 0) / brightnessValues.length;
                 let crossings = 0;
-                let lastSign = (bLeft[0] >= averageBrightness) ? 1 : -1;
-                for (let i = 1; i < scanHeight; i++) {
-                    let currentSign = (bLeft[i] >= averageBrightness) ? 1 : -1;
+                let lastSign = (brightnessValues[0] >= averageBrightness) ? 1 : -1;
+                
+                for (let i = 1; i < brightnessValues.length; i++) {
+                    let currentSign = (brightnessValues[i] >= averageBrightness) ? 1 : -1;
                     if (currentSign !== lastSign) {
                         crossings++;
                         lastSign = currentSign;
                     }
                 }
 
-                // 將破案關鍵數據印出來
-                debugDiv.innerText = `最亮:${Math.round(maxB)} | 最暗:${Math.round(minB)} | 條紋:${crossings} | 左右差異:${Math.round(avgSpatialDiff)}`;
+                // 顯示關鍵數據：新增「動態閃爍像素」
+                debugDiv.innerText = `最亮:${Math.round(maxB)} | 對比:${Math.round(contrast)} | 條紋:${crossings} | 閃爍像素:${flickerPixelCount}`;
 
                 // ==========================================
-                // 物理實體 100% 絕對封殺邏輯
+                // 【終極防線】：時空雙重指紋驗證
                 // ==========================================
                 let isSignalValid = false;
 
-                // 條件一：最亮 > 220 (必須有強光)
-                // 條件二：【新增】最暗 < 70 (發射器暗頻時是絕對黑體，沒通電的板子最暗通常大於 80)
-                // 條件三：波動 > 800 (維持高頻特徵)
-                // 條件四：條紋 >= 4 (具備一定的閃爍數量)
-                // 條件五：【終極絕殺】左右差異度 (avgSpatialDiff) 必須 < 25！
-                // 真光的條紋是橫向連續的，左右差異度極低 (通常 5~15)。物理實體左右長得不一樣，差異度隨便都破 30！
-                
-                if (maxB > 220 && minB < 70 && totalVariation > 800 && crossings >= 4 && avgSpatialDiff < 25) {
+                // 條件一：必須具有基礎條紋對比度 (>120)
+                // 條件二：條紋數必須符合高頻光柵特徵 (2 到 12 條)
+                // 條件三：【絕殺條件】閃爍像素必須在 15 到 80 之間！
+                // -> 如果照到沒通電的板子或字體，閃爍像素通常 < 5，直接封殺。
+                // -> 如果快速晃動手機洗畫面，閃爍像素會飆破 100，一樣封殺！
+                if (contrast > 120 && crossings >= 2 && crossings <= 12 && flickerPixelCount >= 15 && flickerPixelCount <= 80) {
                     isSignalValid = true;
                 }
 
                 if (isSignalValid) {
                     validFrameCount++;
                     if (validFrameCount < 3) {
-                        statusDiv.innerText = `🔍 立體特徵鎖定中... (${validFrameCount}/3)`;
+                        statusDiv.innerText = `🔍 驗證高頻相位動態中... (${validFrameCount}/3)`;
                         statusDiv.style.color = "orange";
                     } else {
                         sendData("A");
@@ -189,8 +186,8 @@
                     }
                 } else {
                     validFrameCount = 0; 
-                    if (statusDiv.innerText.includes("鎖定中")) {
-                        statusDiv.innerText = "請將發射器置於「雙紅色探針」之間...";
+                    if (statusDiv.innerText.includes("驗證高頻")) {
+                        statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
                         statusDiv.style.color = "#007bff";
                     }
                 }
@@ -222,7 +219,7 @@
             }
 
             isSending = true;
-            statusDiv.innerText = "🔒 雙探針立體驗證通過！傳送中...";
+            statusDiv.innerText = "🔒 動態解碼成功！打卡傳送中...";
             statusDiv.style.color = "#007bff";
 
             const fetchUrl = `${API_URL}?student_id=${studentId}&room=${roomCode}`;
@@ -235,7 +232,7 @@
                     statusDiv.style.color = "green";
                     setTimeout(() => { 
                         isSending = false; 
-                        statusDiv.innerText = "請將發射器置於「雙紅色探針」之間...";
+                        statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
                         statusDiv.style.color = "#007bff";
                     }, 3000); 
                 })
