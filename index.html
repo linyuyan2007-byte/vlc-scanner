@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (時序防偽版)</title>
+    <title>Li-Fi 商業級打卡系統 (防手震終極版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -25,7 +25,7 @@
             width: 60px;
             height: 160px;
             transform: translate(-50%, -50%);
-            border: 2px solid #00ff00;
+            border: 2px dashed #00ff00;
             pointer-events: none;
         }
         
@@ -36,9 +36,9 @@
             width: 2px;
             height: 140px;
             transform: translate(-50%, -50%);
-            background-color: rgba(255, 0, 0, 0.7);
+            background-color: rgba(255, 0, 0, 0.8);
             pointer-events: none;
-            box-shadow: 0 0 4px red;
+            box-shadow: 0 0 5px red;
         }
         
         #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
@@ -80,7 +80,7 @@
         let validFrameCount = 0; 
         let isWarmingUp = false; 
         
-        // 【核心記憶體】：紀錄上一幀的亮度，用來捕捉動態相位漂移
+        // 記憶體：紀錄上一幀的亮度
         let prevBrightnessValues = []; 
 
         function startCamera() {
@@ -115,7 +115,6 @@
                 
                 const centerX = canvas.width / 2;
                 const centerY = canvas.height / 2;
-                
                 const startY = centerY - 70;
                 const scanHeight = 140;
                 const imageData = ctx.getImageData(centerX, startY, 1, scanHeight);
@@ -126,59 +125,73 @@
                     brightnessValues.push((data[i] + data[i+1] + data[i+2]) / 3);
                 }
                 
+                // 1. 取得最高與最低亮度
                 let maxB = Math.max(...brightnessValues);
                 let minB = Math.min(...brightnessValues);
                 let contrast = maxB - minB;
                 
-                // ==========================================
-                // 【核心算法一】：計算時序相位變異（前後兩影格相減）
-                // ==========================================
+                // 2. 計算時序閃爍像素 (前後幀相減)
                 let flickerPixelCount = 0;
                 if (prevBrightnessValues.length === brightnessValues.length) {
                     for (let i = 0; i < brightnessValues.length; i++) {
-                        // 如果該像素點在 50 毫秒內，明暗度變化超過 70 單位
-                        if (Math.abs(brightnessValues[i] - prevBrightnessValues[i]) > 70) {
+                        if (Math.abs(brightnessValues[i] - prevBrightnessValues[i]) > 60) {
                             flickerPixelCount++;
                         }
                     }
                 }
-                // 更新記憶體，供下一幀比對
                 prevBrightnessValues = [...brightnessValues];
 
-                // 計算條紋數量
+                // 3. 計算條紋與寬度
                 let averageBrightness = brightnessValues.reduce((a, b) => a + b, 0) / brightnessValues.length;
                 let crossings = 0;
                 let lastSign = (brightnessValues[0] >= averageBrightness) ? 1 : -1;
+                let lastCrossingIndex = 0;
+                let stripeWidths = [];
                 
                 for (let i = 1; i < brightnessValues.length; i++) {
                     let currentSign = (brightnessValues[i] >= averageBrightness) ? 1 : -1;
                     if (currentSign !== lastSign) {
                         crossings++;
+                        stripeWidths.push(i - lastCrossingIndex);
+                        lastCrossingIndex = i;
                         lastSign = currentSign;
                     }
                 }
 
-                // 顯示關鍵數據：新增「動態閃爍像素」
-                debugDiv.innerText = `最亮:${Math.round(maxB)} | 對比:${Math.round(contrast)} | 條紋:${crossings} | 閃爍像素:${flickerPixelCount}`;
+                // 4. 【核心防手震】：計算寬度規律性
+                let isRegular = false;
+                if (stripeWidths.length >= 2) {
+                    // 去除頭尾不完整的條紋，計算中間條紋的寬度差
+                    let validWidths = stripeWidths.length > 3 ? stripeWidths.slice(1, -1) : stripeWidths;
+                    let minW = Math.min(...validWidths);
+                    let maxW = Math.max(...validWidths);
+                    
+                    // 真正的 1.2kHz 發射器，條紋寬度極度均勻
+                    // 手震產生的條紋寬度會相差非常大
+                    if ((maxW - minW) <= 12) {
+                        isRegular = true;
+                    }
+                }
+
+                debugDiv.innerText = `最亮:${Math.round(maxB)} | 規律:${isRegular} | 條紋:${crossings} | 閃爍:${flickerPixelCount}`;
 
                 // ==========================================
-                // 【終極防線】：時空雙重指紋驗證
+                // 【終極神盾】：三位一體物理驗證
                 // ==========================================
                 let isSignalValid = false;
 
-                // 條件一：必須具有基礎條紋對比度 (>120)
-                // 條件二：條紋數必須符合高頻光柵特徵 (2 到 12 條)
-                // 條件三：【絕殺條件】閃爍像素必須在 15 到 80 之間！
-                // -> 如果照到沒通電的板子或字體，閃爍像素通常 < 5，直接封殺。
-                // -> 如果快速晃動手機洗畫面，閃爍像素會飆破 100，一樣封殺！
-                if (contrast > 120 && crossings >= 2 && crossings <= 12 && flickerPixelCount >= 15 && flickerPixelCount <= 80) {
+                // 條件一：最亮 > 240 (防物理環境光，只有 3W LED 能過載相機)
+                // 條件二：isRegular = true (防手震，手搖出來的線條絕對不規律)
+                // 條件三：crossings >= 3 (確保有基本的斑馬線特徵)
+                // 條件四：flickerPixelCount > 10 (確保它是活的、會閃爍的)
+                if (maxB > 240 && isRegular === true && crossings >= 3 && flickerPixelCount > 10) {
                     isSignalValid = true;
                 }
 
                 if (isSignalValid) {
                     validFrameCount++;
                     if (validFrameCount < 3) {
-                        statusDiv.innerText = `🔍 驗證高頻相位動態中... (${validFrameCount}/3)`;
+                        statusDiv.innerText = `🔍 規律高頻特徵鎖定中... (${validFrameCount}/3)`;
                         statusDiv.style.color = "orange";
                     } else {
                         sendData("A");
@@ -186,7 +199,7 @@
                     }
                 } else {
                     validFrameCount = 0; 
-                    if (statusDiv.innerText.includes("驗證高頻")) {
+                    if (statusDiv.innerText.includes("鎖定中")) {
                         statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
                         statusDiv.style.color = "#007bff";
                     }
@@ -219,7 +232,7 @@
             }
 
             isSending = true;
-            statusDiv.innerText = "🔒 動態解碼成功！打卡傳送中...";
+            statusDiv.innerText = "🔒 三重物理防偽通過！傳送中...";
             statusDiv.style.color = "#007bff";
 
             const fetchUrl = `${API_URL}?student_id=${studentId}&room=${roomCode}`;
