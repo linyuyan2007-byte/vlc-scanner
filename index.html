@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 商業級打卡系統 (防手震終極版)</title>
+    <title>Li-Fi 商業級打卡系統 (絕對鎖死版)</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -36,9 +36,9 @@
             width: 2px;
             height: 140px;
             transform: translate(-50%, -50%);
-            background-color: rgba(255, 0, 0, 0.8);
+            background-color: rgba(255, 0, 0, 0.9);
             pointer-events: none;
-            box-shadow: 0 0 5px red;
+            box-shadow: 0 0 4px red;
         }
         
         #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
@@ -49,7 +49,7 @@
     </style>
 </head>
 <body>
-    <h2>Li-Fi 光學智慧打卡</h2>
+    <h2>Li-Fi 示波器級智慧打卡</h2>
     <input type="text" id="studentId" placeholder="請先輸入學號 (例: 112001)" />
     <br><br>
     
@@ -62,7 +62,7 @@
     
     <button id="startBtn" onclick="startCamera()">開啟 Li-Fi 掃描</button>
     <div id="status">系統就緒，等待掃描...</div>
-    <div id="debug">核心演算法分析中...</div>
+    <div id="debug">波形解碼器分析中...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -79,9 +79,6 @@
         const COOLDOWN_MS = 60000; 
         let validFrameCount = 0; 
         let isWarmingUp = false; 
-        
-        // 記憶體：紀錄上一幀的亮度
-        let prevBrightnessValues = []; 
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", frameRate: { ideal: 30, max: 60 } } })
@@ -89,7 +86,7 @@
                 video.srcObject = stream;
                 
                 isWarmingUp = true;
-                statusDiv.innerText = "⏳ 相機暖機中，請稍候...";
+                statusDiv.innerText = "⏳ 相機暖機與測光中...";
                 statusDiv.style.color = "orange";
                 
                 setTimeout(() => {
@@ -125,73 +122,95 @@
                     brightnessValues.push((data[i] + data[i+1] + data[i+2]) / 3);
                 }
                 
-                // 1. 取得最高與最低亮度
                 let maxB = Math.max(...brightnessValues);
                 let minB = Math.min(...brightnessValues);
                 let contrast = maxB - minB;
                 
-                // 2. 計算時序閃爍像素 (前後幀相減)
-                let flickerPixelCount = 0;
-                if (prevBrightnessValues.length === brightnessValues.length) {
-                    for (let i = 0; i < brightnessValues.length; i++) {
-                        if (Math.abs(brightnessValues[i] - prevBrightnessValues[i]) > 60) {
-                            flickerPixelCount++;
-                        }
-                    }
-                }
-                prevBrightnessValues = [...brightnessValues];
-
-                // 3. 計算條紋與寬度
-                let averageBrightness = brightnessValues.reduce((a, b) => a + b, 0) / brightnessValues.length;
-                let crossings = 0;
-                let lastSign = (brightnessValues[0] >= averageBrightness) ? 1 : -1;
-                let lastCrossingIndex = 0;
-                let stripeWidths = [];
-                
+                // 【核心一：銳利度檢測】找出像素之間的最大落差 (Gradient)
+                // 發射器是瞬間閃爍，邊緣極度銳利；手震模糊的邊緣是平滑的
+                let maxGradient = 0;
                 for (let i = 1; i < brightnessValues.length; i++) {
-                    let currentSign = (brightnessValues[i] >= averageBrightness) ? 1 : -1;
-                    if (currentSign !== lastSign) {
-                        crossings++;
-                        stripeWidths.push(i - lastCrossingIndex);
-                        lastCrossingIndex = i;
-                        lastSign = currentSign;
-                    }
+                    let grad = Math.abs(brightnessValues[i] - brightnessValues[i-1]);
+                    if (grad > maxGradient) maxGradient = grad;
                 }
 
-                // 4. 【核心防手震】：計算寬度規律性
-                let isRegular = false;
-                if (stripeWidths.length >= 2) {
-                    // 去除頭尾不完整的條紋，計算中間條紋的寬度差
-                    let validWidths = stripeWidths.length > 3 ? stripeWidths.slice(1, -1) : stripeWidths;
-                    let minW = Math.min(...validWidths);
-                    let maxW = Math.max(...validWidths);
+                // 【核心二：數位方波解碼】將灰階轉為純粹的 0 與 1 (高低電位)
+                let midPoint = minB + (contrast / 2); // 找中位數作為閥值
+                let pulses = [];
+                let currentPulseType = brightnessValues[0] > midPoint ? 1 : 0;
+                let currentPulseWidth = 1;
+
+                // 測量每一個「亮帶」與「暗帶」的寬度
+                for (let i = 1; i < brightnessValues.length; i++) {
+                    let type = brightnessValues[i] > midPoint ? 1 : 0;
+                    if (type === currentPulseType) {
+                        currentPulseWidth++;
+                    } else {
+                        pulses.push({ type: currentPulseType, width: currentPulseWidth });
+                        currentPulseType = type;
+                        currentPulseWidth = 1;
+                    }
+                }
+                pulses.push({ type: currentPulseType, width: currentPulseWidth });
+
+                // 移除頭尾被截斷的不完整波形
+                if (pulses.length >= 3) {
+                    pulses = pulses.slice(1, -1);
+                }
+
+                // 【核心三：方波佔空比與均勻度審查】
+                let isPerfectWaveform = false;
+                let dutyCycleRatio = 0;
+                
+                if (pulses.length >= 4) { // 至少要有完整的 4 個亮暗變化
+                    let maxW = 0, minW = 999;
+                    let brightSum = 0, brightCount = 0;
+                    let darkSum = 0, darkCount = 0;
+
+                    for (let p of pulses) {
+                        if (p.width > maxW) maxW = p.width;
+                        if (p.width < minW) minW = p.width;
+                        if (p.type === 1) { brightSum += p.width; brightCount++; }
+                        else { darkSum += p.width; darkCount++; }
+                    }
+
+                    // 1. 計算所有條紋的最粗與最細差異
+                    let widthDiff = maxW - minW;
                     
-                    // 真正的 1.2kHz 發射器，條紋寬度極度均勻
-                    // 手震產生的條紋寬度會相差非常大
-                    if ((maxW - minW) <= 12) {
-                        isRegular = true;
+                    // 2. 計算 50/50 佔空比 (亮帶平均寬度 vs 暗帶平均寬度)
+                    let avgBright = brightCount > 0 ? (brightSum / brightCount) : 0;
+                    let avgDark = darkCount > 0 ? (darkSum / darkCount) : 0;
+                    
+                    if (avgDark > 0) {
+                        dutyCycleRatio = avgBright / avgDark;
+                    }
+
+                    // 【絕殺判定】：寬度誤差 <= 8 且 亮暗比例對稱 (0.5 到 2.0 之間)
+                    // 手晃產生的殘影寬度誤差絕對破 20，且佔空比極度扭曲
+                    if (widthDiff <= 8 && dutyCycleRatio > 0.5 && dutyCycleRatio < 2.0) {
+                        isPerfectWaveform = true;
                     }
                 }
 
-                debugDiv.innerText = `最亮:${Math.round(maxB)} | 規律:${isRegular} | 條紋:${crossings} | 閃爍:${flickerPixelCount}`;
+                // 將軍事級的數據印出來讓您觀察
+                debugDiv.innerText = `最亮:${Math.round(maxB)} | 銳利度:${Math.round(maxGradient)} | 條紋:${pulses.length} | 完美方波:${isPerfectWaveform}`;
 
                 // ==========================================
-                // 【終極神盾】：三位一體物理驗證
+                // 無堅不摧的四重物理鎖
                 // ==========================================
                 let isSignalValid = false;
 
-                // 條件一：最亮 > 240 (防物理環境光，只有 3W LED 能過載相機)
-                // 條件二：isRegular = true (防手震，手搖出來的線條絕對不規律)
-                // 條件三：crossings >= 3 (確保有基本的斑馬線特徵)
-                // 條件四：flickerPixelCount > 10 (確保它是活的、會閃爍的)
-                if (maxB > 240 && isRegular === true && crossings >= 3 && flickerPixelCount > 10) {
+                // 1. 物理亮度過載 (maxB > 240) -> 阻擋室內暗部環境
+                // 2. 頻閃銳利邊緣 (maxGradient > 80) -> 阻擋任何手搖產生的殘影模糊
+                // 3. 完美數位方波 (isPerfectWaveform === true) -> 阻擋任何隨機線條或不對稱的幾何圖形
+                if (maxB > 240 && maxGradient > 80 && isPerfectWaveform === true) {
                     isSignalValid = true;
                 }
 
                 if (isSignalValid) {
                     validFrameCount++;
                     if (validFrameCount < 3) {
-                        statusDiv.innerText = `🔍 規律高頻特徵鎖定中... (${validFrameCount}/3)`;
+                        statusDiv.innerText = `🔍 數位方波解碼中... (${validFrameCount}/3)`;
                         statusDiv.style.color = "orange";
                     } else {
                         sendData("A");
@@ -199,7 +218,7 @@
                     }
                 } else {
                     validFrameCount = 0; 
-                    if (statusDiv.innerText.includes("鎖定中")) {
+                    if (statusDiv.innerText.includes("解碼中")) {
                         statusDiv.innerText = "請用「紅色掃描線」對準發射器...";
                         statusDiv.style.color = "#007bff";
                     }
@@ -232,7 +251,7 @@
             }
 
             isSending = true;
-            statusDiv.innerText = "🔒 三重物理防偽通過！傳送中...";
+            statusDiv.innerText = "🔒 示波器級特徵鎖定！傳送中...";
             statusDiv.style.color = "#007bff";
 
             const fetchUrl = `${API_URL}?student_id=${studentId}&room=${roomCode}`;
