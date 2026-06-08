@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 六軌密碼打卡系統</title>
+    <title>Li-Fi 極速密碼打卡系統</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -37,7 +37,7 @@
     </style>
 </head>
 <body>
-    <h2>Li-Fi 智慧解碼打卡系統</h2>
+    <h2>Li-Fi 極速解碼打卡系統</h2>
     
     <div class="input-group">
         <label>📍 教室代碼：</label>
@@ -46,14 +46,14 @@
         <label>🎓 學生學號：</label>
         <input type="text" id="studentId" placeholder="請輸入學號 (例: 112001)" />
         
-        <label>📱 設備綁定 (指定解碼通道)：</label>
+        <label>📱 設備綁定：</label>
         <select id="phoneIdentity">
-            <option value="1">我是：手機 1 (只收密碼 1)</option>
-            <option value="2">我是：手機 2 (只收密碼 2)</option>
-            <option value="3">我是：手機 3 (只收密碼 3)</option>
-            <option value="4">我是：手機 4 (只收密碼 4)</option>
-            <option value="5">我是：手機 5 (只收密碼 5)</option>
-            <option value="6">我是：手機 6 (只收密碼 6)</option>
+            <option value="1">我是：手機 1 (通道 1)</option>
+            <option value="2">我是：手機 2 (通道 2)</option>
+            <option value="3">我是：手機 3 (通道 3)</option>
+            <option value="4">我是：手機 4 (通道 4)</option>
+            <option value="5">我是：手機 5 (通道 5)</option>
+            <option value="6">我是：手機 6 (通道 6)</option>
         </select>
     </div>
     <br>
@@ -64,9 +64,9 @@
     </div>
     <br>
     
-    <button id="startBtn" onclick="startCamera()">啟動光學密碼掃描</button>
+    <button id="startBtn" onclick="startCamera()">啟動極速掃描</button>
     <div id="status">系統就緒，等待開啟...</div>
-    <div id="debug">六軌封包狀態機就緒...</div>
+    <div id="debug">六軌狀態機就緒...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -77,7 +77,6 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        // 您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
         const COOLDOWN_MS = 60000; 
 
@@ -112,7 +111,7 @@
                 statusDiv.style.color = "#007bff";
             }, 2000);
 
-            // 保持 12ms 極速採樣，確保不漏接任何 30Hz 脈衝切換
+            // 保持 12ms 採樣，對應 30ms 基礎單位能有至少兩次採樣，確保不漏波
             setInterval(analyzeTemporalPulse, 12); 
         }
 
@@ -120,11 +119,11 @@
             if (isWarmingUp || isSending) return;
 
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                canvas.width = 80;
-                canvas.height = 80;
-                ctx.drawImage(video, video.videoWidth/2 - 40, video.videoHeight/2 - 40, 80, 80, 0, 0, 80, 80);
+                canvas.width = 60;
+                canvas.height = 60; // 縮小擷取範圍，降低瀏覽器運算延遲
+                ctx.drawImage(video, video.videoWidth/2 - 30, video.videoHeight/2 - 30, 60, 60, 0, 0, 60, 60);
                 
-                const imageData = ctx.getImageData(0, 0, 80, 80).data;
+                const imageData = ctx.getImageData(0, 0, 60, 60).data;
                 let totalBrightness = 0, maxB = 0, minB = 255;
 
                 for (let i = 0; i < imageData.length; i += 4) {
@@ -163,37 +162,37 @@
         function decodePulse(state, duration) {
             const targetIdentity = document.getElementById('phoneIdentity').value;
             
-            // 狀態 1 = 偵測亮光脈衝長度
             if (state === 1) {
-                // 1. 【START 標頭】預期 231ms (容差設定：200ms ~ 320ms)
-                if (duration >= 200 && duration <= 320) {
+                // 【高容錯化】：大幅放寬判定邊界，應對手機掉幀問題
+                // 1. 【START 標頭】預期 210ms (容差：170ms ~ 300ms)
+                if (duration >= 170 && duration <= 300) {
                     isReceivingPacket = true;
                     currentSequence = []; 
-                    debugDiv.innerText = "📥 [START] 封包開始，接收密碼中...";
+                    debugDiv.innerText = "📥 [START] 抓取中...";
                     return;
                 }
 
                 if (isReceivingPacket) {
-                    // 2. 【SHORT 短訊號】預期 33ms (容差設定：15ms ~ 65ms)
-                    if (duration >= 15 && duration <= 65) {
+                    // 2. 【SHORT 短訊號】預期 30ms (容差：10ms ~ 65ms)
+                    if (duration >= 10 && duration <= 65) {
                         currentSequence.push("S");
                     } 
-                    // 3. 【LONG 長訊號】預期 99ms (容差設定：70ms ~ 130ms)
-                    else if (duration >= 70 && duration <= 130) {
+                    // 3. 【LONG 長訊號】預期 90ms (容差：70ms ~ 125ms)
+                    else if (duration >= 70 && duration <= 125) {
                         currentSequence.push("L");
                     } 
-                    // 4. 【END 結尾】預期 165ms (容差設定：135ms ~ 190ms)
-                    else if (duration >= 135 && duration <= 190) {
+                    // 4. 【END 結尾】預期 150ms (容差：130ms ~ 165ms)
+                    else if (duration >= 130 && duration <= 165) {
                         processPacket(targetIdentity);
                     }
                     else {
                         isReceivingPacket = false;
-                        debugDiv.innerText = `❌ 雜訊干擾 (寬度: ${Math.round(duration)}ms)，丟棄封包`;
+                        debugDiv.innerText = `❌ 掉幀雜訊 (${Math.round(duration)}ms)，等待重試`;
                     }
                 }
             } else {
-                // 輪波間隔暗區 (約 500ms)，若超過 800ms 則重置防呆
-                if (duration > 800) {
+                // 輪波間隔暗區大幅縮短，超過 500ms 即重置
+                if (duration > 500) {
                     isReceivingPacket = false;
                 }
             }
@@ -203,7 +202,6 @@
             isReceivingPacket = false; 
             let detectedCode = 0;
             
-            // 將陣列轉為字串進行 6 組解碼匹配
             let sig = currentSequence.join(","); 
 
             if (sig === "S,S,S") detectedCode = 1;
@@ -214,16 +212,17 @@
             if (sig === "L,L,S") detectedCode = 6;
 
             if (detectedCode > 0) {
-                debugDiv.innerText = `✅ [END] 解析完成：【密碼 ${detectedCode}】(${sig})`;
+                debugDiv.innerText = `✅ 解碼成功：密碼 ${detectedCode} (${sig})`;
                 
                 if (detectedCode == targetIdentity) {
                     sendData(detectedCode);
                 } else {
-                    statusDiv.innerText = `🔄 收到密碼 ${detectedCode}，非本機通道(手機${targetIdentity})，等待輪播...`;
+                    // 只顯示簡短提示，讓使用者知道系統有在高速運作
+                    statusDiv.innerText = `⏩ 略過手機 ${detectedCode}，尋找本機中...`;
                     statusDiv.style.color = "purple";
                 }
             } else {
-                debugDiv.innerText = `⚠️ 封包不完整或破損 (${sig})`;
+                debugDiv.innerText = `⚠️ 訊號破損 (${sig})，自動重試`;
             }
             
             currentSequence = []; 
@@ -236,19 +235,12 @@
             const rawStudentId = document.getElementById('studentId').value.trim();
             
             if(!roomCode || !rawStudentId) {
-                statusDiv.innerText = `❌ 解碼成功！但請確認已輸入「教室代碼」與「學號」。`;
+                statusDiv.innerText = `❌ 解碼成功！但請輸入「教室代碼」與「學號」。`;
                 statusDiv.style.color = "red";
                 return;
             }
 
-            // ==========================================
-            // 結合學號與手機編號 (例如: 112001-手機3)
-            // ==========================================
             const combinedStudentId = `${rawStudentId}-手機${matchedCode}`;
-
-            // ==========================================
-            // 1 分鐘嚴格防刷機制 (基於原始學號防刷)
-            // ==========================================
             const now = Date.now();
             const storageKey = 'lastCheckIn_' + rawStudentId;
             const lastCheckIn = localStorage.getItem(storageKey);
@@ -257,17 +249,16 @@
                 const timePassed = now - parseInt(lastCheckIn);
                 if (timePassed < COOLDOWN_MS) {
                     let remainSeconds = Math.ceil((COOLDOWN_MS - timePassed) / 1000);
-                    statusDiv.innerText = `⏳ 學號 ${rawStudentId} 請勿狂刷！請等待 ${remainSeconds} 秒。`;
+                    statusDiv.innerText = `⏳ 防刷機制啟動！請等待 ${remainSeconds} 秒。`;
                     statusDiv.style.color = "red";
                     return; 
                 }
             }
 
             isSending = true;
-            statusDiv.innerText = `🎉 驗證通過！資料傳送中...`;
+            statusDiv.innerText = `⚡ 驗證通過！資料極速傳送中...`;
             statusDiv.style.color = "green";
 
-            // API 傳送結構：學號欄位放入結合體，教室欄位放入真實教室代碼
             const fetchUrl = `${API_URL}?student_id=${encodeURIComponent(combinedStudentId)}&room=${encodeURIComponent(roomCode)}`;
             
             fetch(fetchUrl)
