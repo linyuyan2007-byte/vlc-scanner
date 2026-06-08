@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>205 教室 - Li-Fi 智慧打卡</title>
+    <title>Li-Fi 極速密碼打卡</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -16,8 +16,22 @@
             overflow: hidden;
             background: #000;
             margin-bottom: 10px;
+            /* 確保畫面維持比例 */
+            aspect-ratio: 3/4; 
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
-        video { width: 100%; display: block; }
+        
+        /* 影片變焦效果關鍵設定 */
+        video { 
+            width: 100%; 
+            height: 100%; 
+            object-fit: cover; 
+            transform-origin: center center;
+            transition: transform 0.1s ease-out;
+        }
+        
         .target-box {
             position: absolute;
             top: 50%;
@@ -27,35 +41,34 @@
             transform: translate(-50%, -50%);
             border: 3px dashed #00ff00;
             pointer-events: none;
+            z-index: 10;
         }
+        
         #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
         #debug { color: #555; font-size: 11px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; font-weight:bold; }
-        input, select { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 250px; margin-bottom: 10px; box-sizing: border-box; }
+        
+        input[type="text"], select { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 250px; margin-bottom: 10px; box-sizing: border-box; }
+        
+        /* 變焦拉桿的樣式設計 */
+        .zoom-control { margin: 10px 0 20px 0; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        input[type="range"] { width: 180px; cursor: pointer; }
+        .zoom-icon { font-size: 18px; }
+
         button { padding: 12px 24px; font-size: 16px; background-color: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 250px; }
         button:hover { background-color: #27ae60; }
         
-        /* 專屬 UI 美化 */
         .input-group { background: #fff; padding: 20px 15px 15px 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: inline-block; margin-bottom: 15px; text-align: left; width: 250px; }
         .input-group label { font-size: 14px; font-weight: bold; color: #333; display: block; margin-bottom: 5px; }
-        
-        /* 鎖死教室代碼的醒目設計 */
-        .fixed-room { font-size: 16px; font-weight: bold; color: #2c3e50; text-align: center; border-bottom: 2px dashed #ddd; padding-bottom: 15px; margin-bottom: 15px; }
-        .highlight-room { color: #e74c3c; font-size: 28px; display: block; margin-top: 5px; letter-spacing: 2px;}
     </style>
 </head>
 <body>
     <h2>Li-Fi 極速解碼打卡系統</h2>
     
     <div class="input-group">
-        <div class="fixed-room">
-            📍 目前打卡教室
-            <span class="highlight-room">205</span>
-        </div>
-        
         <label>🎓 學生學號：</label>
         <input type="text" id="studentId" placeholder="請輸入學號 (例: 112001)" />
         
-        <label>📱 設備綁定通道：</label>
+        <label>📱 設備綁定：</label>
         <select id="phoneIdentity">
             <option value="1">我是：手機 1 (通道 1)</option>
             <option value="2">我是：手機 2 (通道 2)</option>
@@ -71,7 +84,12 @@
         <video id="video" autoplay playsinline></video>
         <div class="target-box"></div>
     </div>
-    <br>
+    
+    <div class="zoom-control">
+        <span class="zoom-icon">🔍</span>
+        <input type="range" id="zoomSlider" min="1" max="5" step="0.1" value="1" oninput="updateZoom()">
+        <span class="zoom-icon">➕</span>
+    </div>
     
     <button id="startBtn" onclick="startCamera()">啟動極速掃描</button>
     <div id="status">系統就緒，等待開啟...</div>
@@ -86,11 +104,10 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        // 您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
         const COOLDOWN_MS = 60000; 
         
-        // 【核心設定】將教室代碼鎖死為 205
+        // 【核心設定】後台硬體寫死的教室代碼 (UI上看不見，但傳送時會自動帶入)
         const FIXED_ROOM_CODE = "205";
 
         let lastState = -1;
@@ -98,6 +115,13 @@
         let currentSequence = [];
         let isReceivingPacket = false;
         let isWarmingUp = false;
+
+        // 【新增功能】變焦控制器 (Digital Zoom)
+        function updateZoom() {
+            const zoomVal = document.getElementById('zoomSlider').value;
+            // 透過 CSS Transform 放大畫面，綠色準星保持不動，完美模擬相機變焦
+            video.style.transform = `scale(${zoomVal})`;
+        }
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
@@ -118,9 +142,13 @@
             statusDiv.innerText = "⏳ 鏡頭曝光校準中...";
             statusDiv.style.color = "orange";
             
+            // 重置拉桿
+            document.getElementById('zoomSlider').value = 1;
+            updateZoom();
+            
             setTimeout(() => {
                 isWarmingUp = false;
-                statusDiv.innerText = "請將綠色方框對準發射器 LED";
+                statusDiv.innerText = "請滑動拉桿放大，對準發射器 LED";
                 statusDiv.style.color = "#007bff";
             }, 2000);
 
@@ -238,7 +266,6 @@
             if (isSending) return;
             const rawStudentId = document.getElementById('studentId').value.trim();
             
-            // 移除了對 roomCode 的檢查，只需檢查學號
             if(!rawStudentId) {
                 statusDiv.innerText = `❌ 解碼成功！但您忘記輸入「學號」了。`;
                 statusDiv.style.color = "red";
@@ -264,7 +291,7 @@
             statusDiv.innerText = `⚡ 驗證通過！資料極速傳送中...`;
             statusDiv.style.color = "green";
 
-            // 直接將 FIXED_ROOM_CODE (205) 寫入 API 網址中
+            // 隱藏的 FIXED_ROOM_CODE 在此發揮作用，後台依然會記錄 205
             const fetchUrl = `${API_URL}?student_id=${encodeURIComponent(combinedStudentId)}&room=${encodeURIComponent(FIXED_ROOM_CODE)}`;
             
             fetch(fetchUrl)
@@ -274,7 +301,7 @@
                     statusDiv.innerText = "🎉 " + result + " (打卡成功)";
                     setTimeout(() => { 
                         isSending = false; 
-                        statusDiv.innerText = "請將綠色方框對準發射器 LED";
+                        statusDiv.innerText = "請滑動拉桿放大，對準發射器 LED";
                         statusDiv.style.color = "#007bff";
                     }, 3000); 
                 })
