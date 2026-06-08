@@ -34,8 +34,8 @@
             position: absolute;
             top: 50%;
             left: 50%;
-            width: 120px; /* 擴大綠框，讓您更好對準 */
-            height: 120px;
+            width: 100px;
+            height: 100px;
             transform: translate(-50%, -50%);
             border: 3px dashed #00ff00;
             pointer-events: none;
@@ -88,9 +88,9 @@
         <span class="zoom-icon">➕</span>
     </div>
     
-    <button id="startBtn" onclick="startCamera()">啟動極速防震掃描</button>
+    <button id="startBtn" onclick="startCamera()">啟動自適應防震掃描</button>
     <div id="status">系統就緒，等待開啟...</div>
-    <div id="debug">硬體全域追瞄系統就緒...</div>
+    <div id="debug">動態自適應系統就緒...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -108,26 +108,28 @@
         let videoTrack = null;
         let nativeZoomSupported = false;
 
-        // 時序狀態機變數
         let lastState = -1;
         let lastTransitionTime = performance.now();
         let currentSequence = [];
         let isReceivingPacket = false;
         let isWarmingUp = false;
         
-        // 【新增】高光追瞄歷史陣列
+        // 動態自適應歷史記憶體
         let temporalHistory = [];
 
         function updateZoom() {
             const zoomVal = parseFloat(document.getElementById('zoomSlider').value);
             if (nativeZoomSupported && videoTrack) {
-                // 優先使用硬體底層真實變焦 (畫質不失真、不漂移)
-                videoTrack.applyConstraints({ advanced: [{ zoom: zoomVal }] });
+                videoTrack.applyConstraints({ advanced: [{ zoom: zoomVal }] }).catch(e => console.log("Zoom error:", e));
                 video.style.transform = `scale(1)`; 
             } else {
-                // 不支援的瀏覽器退回 CSS 變焦
                 video.style.transform = `scale(${zoomVal})`;
             }
+            // 【關鍵防呆】：變焦的瞬間相機可能會卡頓閃爍，直接清空歷史紀錄與狀態機，避免產生誤判
+            temporalHistory = [];
+            currentSequence = [];
+            isReceivingPacket = false;
+            lastState = -1;
         }
 
         function startCamera() {
@@ -147,7 +149,6 @@
             video.srcObject = stream;
             videoTrack = stream.getVideoTracks()[0];
             
-            // 偵測並綁定相機的硬體變焦能力
             const capabilities = videoTrack.getCapabilities();
             const slider = document.getElementById('zoomSlider');
             if (capabilities.zoom) {
@@ -162,7 +163,7 @@
             }
 
             isWarmingUp = true;
-            statusDiv.innerText = "⏳ 追瞄系統曝光校準中...";
+            statusDiv.innerText = "⏳ 鏡頭曝光校準中...";
             statusDiv.style.color = "orange";
             
             setTimeout(() => {
@@ -178,34 +179,34 @@
             if (isWarmingUp || isSending) return;
 
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                // 【核心升級一】將掃描區域擴大到 100x100，包容劇烈手震
-                const captureSize = 100;
+                const captureSize = 100; // 100x100 的方框大小
                 canvas.width = captureSize;
                 canvas.height = captureSize; 
                 ctx.drawImage(video, video.videoWidth/2 - captureSize/2, video.videoHeight/2 - captureSize/2, captureSize, captureSize, 0, 0, captureSize, captureSize);
                 
                 const imageData = ctx.getImageData(0, 0, captureSize, captureSize).data;
-                let frameMaxB = 0;
+                let totalBrightness = 0;
 
-                // 【核心升級二】飛彈追瞄演算法：不管 LED 跑到哪裡，只找當下畫面最亮的那一顆像素！
+                // 核心一：計算整體平均亮度 (有效過濾單點光暈與雜訊)
                 for (let i = 0; i < imageData.length; i += 4) {
-                    let b = (imageData[i] + imageData[i+1] + imageData[i+2]) / 3;
-                    if (b > frameMaxB) frameMaxB = b;
+                    totalBrightness += (imageData[i] + imageData[i+1] + imageData[i+2]) / 3;
                 }
+                let avgBrightness = totalBrightness / (captureSize * captureSize);
                 
-                // 動態歷史高低光閥值 (防環境光干擾)
-                temporalHistory.push(frameMaxB);
-                if (temporalHistory.length > 20) temporalHistory.shift();
+                // 核心二：推入記憶體，追蹤最近 30 幀 (約 0.36 秒) 的光影起伏
+                temporalHistory.push(avgBrightness);
+                if (temporalHistory.length > 30) temporalHistory.shift(); 
 
+                // 核心三：動態計算最高與最低點
                 let histMax = Math.max(...temporalHistory);
                 let histMin = Math.min(...temporalHistory);
                 let contrast = histMax - histMin;
 
-                // 只要畫面閃爍對比足夠，就啟動解碼
-                if (contrast > 40) { 
+                // 只要平均亮度波動大於 15，就代表 LED 有在閃爍
+                if (contrast > 15) { 
+                    // 動態切分線：不管變焦後畫面變亮還是變暗，這條線永遠畫在光影的正中間
                     let midPoint = histMin + (contrast / 2);
-                    // 只要最亮的那顆像素大於動態中間值，就代表 LED 是亮的！
-                    let currentState = frameMaxB > midPoint ? 1 : 0;
+                    let currentState = avgBrightness > midPoint ? 1 : 0;
 
                     if (lastState === -1) {
                         lastState = currentState;
