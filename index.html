@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 硬體變焦防震打卡</title>
+    <title>Li-Fi 三軌極速打卡系統</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -59,7 +59,7 @@
     </style>
 </head>
 <body>
-    <h2>Li-Fi 極速解碼打卡系統</h2>
+    <h2>Li-Fi 三軌極速解碼打卡</h2>
     
     <div class="input-group">
         <label>🎓 學生學號：</label>
@@ -70,9 +70,6 @@
             <option value="1">我是：手機 1 (通道 1)</option>
             <option value="2">我是：手機 2 (通道 2)</option>
             <option value="3">我是：手機 3 (通道 3)</option>
-            <option value="4">我是：手機 4 (通道 4)</option>
-            <option value="5">我是：手機 5 (通道 5)</option>
-            <option value="6">我是：手機 6 (通道 6)</option>
         </select>
     </div>
     <br>
@@ -90,7 +87,7 @@
     
     <button id="startBtn" onclick="startCamera()">啟動自適應防震掃描</button>
     <div id="status">系統就緒，等待開啟...</div>
-    <div id="debug">動態自適應系統就緒...</div>
+    <div id="debug">三軌動態系統就緒...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -103,7 +100,7 @@
         
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
         const COOLDOWN_MS = 60000; 
-        const FIXED_ROOM_CODE = "205";
+        const FIXED_ROOM_CODE = "205"; // 後台隱藏綁定的教室代碼
 
         let videoTrack = null;
         let nativeZoomSupported = false;
@@ -114,7 +111,6 @@
         let isReceivingPacket = false;
         let isWarmingUp = false;
         
-        // 動態自適應歷史記憶體
         let temporalHistory = [];
 
         function updateZoom() {
@@ -125,7 +121,6 @@
             } else {
                 video.style.transform = `scale(${zoomVal})`;
             }
-            // 【關鍵防呆】：變焦的瞬間相機可能會卡頓閃爍，直接清空歷史紀錄與狀態機，避免產生誤判
             temporalHistory = [];
             currentSequence = [];
             isReceivingPacket = false;
@@ -139,7 +134,7 @@
                 navigator.mediaDevices.getUserMedia({ video: true })
                 .then(function(stream) { initCameraStream(stream); })
                 .catch(function(err2) {
-                    statusDiv.innerText = "❌ 無法開啟相機，請允許相機權限！";
+                    statusDiv.innerText = "❌ 無法開啟相機，請允許權限！";
                     statusDiv.style.color = "red";
                 });
             });
@@ -163,12 +158,12 @@
             }
 
             isWarmingUp = true;
-            statusDiv.innerText = "⏳ 鏡頭曝光校準中...";
+            statusDiv.innerText = "⏳ 系統曝光校準中...";
             statusDiv.style.color = "orange";
             
             setTimeout(() => {
                 isWarmingUp = false;
-                statusDiv.innerText = "請滑動拉桿放大，將 LED 放入綠框內";
+                statusDiv.innerText = "請將 LED 放入綠框內 (可拉近放大)";
                 statusDiv.style.color = "#007bff";
             }, 2000);
 
@@ -179,7 +174,7 @@
             if (isWarmingUp || isSending) return;
 
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                const captureSize = 100; // 100x100 的方框大小
+                const captureSize = 100; 
                 canvas.width = captureSize;
                 canvas.height = captureSize; 
                 ctx.drawImage(video, video.videoWidth/2 - captureSize/2, video.videoHeight/2 - captureSize/2, captureSize, captureSize, 0, 0, captureSize, captureSize);
@@ -187,24 +182,19 @@
                 const imageData = ctx.getImageData(0, 0, captureSize, captureSize).data;
                 let totalBrightness = 0;
 
-                // 核心一：計算整體平均亮度 (有效過濾單點光暈與雜訊)
                 for (let i = 0; i < imageData.length; i += 4) {
                     totalBrightness += (imageData[i] + imageData[i+1] + imageData[i+2]) / 3;
                 }
                 let avgBrightness = totalBrightness / (captureSize * captureSize);
                 
-                // 核心二：推入記憶體，追蹤最近 30 幀 (約 0.36 秒) 的光影起伏
                 temporalHistory.push(avgBrightness);
                 if (temporalHistory.length > 30) temporalHistory.shift(); 
 
-                // 核心三：動態計算最高與最低點
                 let histMax = Math.max(...temporalHistory);
                 let histMin = Math.min(...temporalHistory);
                 let contrast = histMax - histMin;
 
-                // 只要平均亮度波動大於 15，就代表 LED 有在閃爍
                 if (contrast > 15) { 
-                    // 動態切分線：不管變焦後畫面變亮還是變暗，這條線永遠畫在光影的正中間
                     let midPoint = histMin + (contrast / 2);
                     let currentState = avgBrightness > midPoint ? 1 : 0;
 
@@ -250,7 +240,7 @@
                     }
                     else {
                         isReceivingPacket = false;
-                        debugDiv.innerText = `❌ 手震偏移過大 (${Math.round(duration)}ms)，重新鎖定`;
+                        debugDiv.innerText = `❌ 手震偏移 (${Math.round(duration)}ms)，重新鎖定`;
                     }
                 }
             } else {
@@ -266,12 +256,10 @@
             
             let sig = currentSequence.join(","); 
 
+            // 精簡為 3 組驗證邏輯
             if (sig === "S,S,S") detectedCode = 1;
             if (sig === "S,S,L") detectedCode = 2;
             if (sig === "S,L,S") detectedCode = 3;
-            if (sig === "L,S,S") detectedCode = 4;
-            if (sig === "L,S,L") detectedCode = 5;
-            if (sig === "L,L,S") detectedCode = 6;
 
             if (detectedCode > 0) {
                 debugDiv.innerText = `✅ 解碼成功：密碼 ${detectedCode} (${sig})`;
@@ -309,7 +297,7 @@
                 const timePassed = now - parseInt(lastCheckIn);
                 if (timePassed < COOLDOWN_MS) {
                     let remainSeconds = Math.ceil((COOLDOWN_MS - timePassed) / 1000);
-                    statusDiv.innerText = `⏳ 防刷機制啟動！請等待 ${remainSeconds} 秒。`;
+                    statusDiv.innerText = `⏳ 防刷機制！請等待 ${remainSeconds} 秒。`;
                     statusDiv.style.color = "red";
                     return; 
                 }
@@ -328,7 +316,7 @@
                     statusDiv.innerText = "🎉 " + result + " (打卡成功)";
                     setTimeout(() => { 
                         isSending = false; 
-                        statusDiv.innerText = "請滑動拉桿放大，將 LED 放入綠框內";
+                        statusDiv.innerText = "請將 LED 放入綠框內 (可拉近放大)";
                         statusDiv.style.color = "#007bff";
                     }, 3000); 
                 })
