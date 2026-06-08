@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 封包式摩斯密碼系統</title>
+    <title>Li-Fi 六軌密碼打卡系統</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -29,22 +29,34 @@
         }
         #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
         #debug { color: #555; font-size: 11px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; font-weight:bold; }
-        input, select { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 220px; margin-bottom: 10px; }
+        input, select { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 250px; margin-bottom: 10px; }
         button { padding: 12px 24px; font-size: 16px; background-color: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         button:hover { background-color: #27ae60; }
+        .input-group { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; margin-bottom: 15px; text-align: left;}
+        .input-group label { font-size: 14px; font-weight: bold; color: #333; display: block; margin-bottom: 5px; }
     </style>
 </head>
 <body>
-    <h2>Li-Fi 封包式密碼打卡</h2>
+    <h2>Li-Fi 智慧解碼打卡系統</h2>
     
-    <select id="phoneIdentity">
-        <option value="1">📱 我是：手機 1 (只收密碼 1)</option>
-        <option value="2">📱 我是：手機 2 (只收密碼 2)</option>
-        <option value="3">📱 我是：手機 3 (只收密碼 3)</option>
-    </select>
+    <div class="input-group">
+        <label>📍 教室代碼：</label>
+        <input type="text" id="roomCode" placeholder="請輸入教室代碼 (例: A教室)" />
+        
+        <label>🎓 學生學號：</label>
+        <input type="text" id="studentId" placeholder="請輸入學號 (例: 112001)" />
+        
+        <label>📱 設備綁定 (指定解碼通道)：</label>
+        <select id="phoneIdentity">
+            <option value="1">我是：手機 1 (只收密碼 1)</option>
+            <option value="2">我是：手機 2 (只收密碼 2)</option>
+            <option value="3">我是：手機 3 (只收密碼 3)</option>
+            <option value="4">我是：手機 4 (只收密碼 4)</option>
+            <option value="5">我是：手機 5 (只收密碼 5)</option>
+            <option value="6">我是：手機 6 (只收密碼 6)</option>
+        </select>
+    </div>
     <br>
-    <input type="text" id="studentId" placeholder="請先輸入學號 (例: 112001)" />
-    <br><br>
     
     <div class="video-container">
         <video id="video" autoplay playsinline></video>
@@ -52,9 +64,9 @@
     </div>
     <br>
     
-    <button id="startBtn" onclick="startCamera()">啟動封包解碼器</button>
+    <button id="startBtn" onclick="startCamera()">啟動光學密碼掃描</button>
     <div id="status">系統就緒，等待開啟...</div>
-    <div id="debug">封包狀態機就緒...</div>
+    <div id="debug">六軌封包狀態機就緒...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -65,11 +77,10 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        // 確保這是您的專屬 Google API
+        // 您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
         const COOLDOWN_MS = 60000; 
 
-        // 狀態機核心變數
         let lastState = -1;
         let lastTransitionTime = performance.now();
         let currentSequence = [];
@@ -78,9 +89,7 @@
 
         function startCamera() {
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-            .then(function(stream) {
-                initCameraStream(stream);
-            })
+            .then(function(stream) { initCameraStream(stream); })
             .catch(function(err) {
                 navigator.mediaDevices.getUserMedia({ video: true })
                 .then(function(stream) { initCameraStream(stream); })
@@ -103,8 +112,8 @@
                 statusDiv.style.color = "#007bff";
             }, 2000);
 
-            // 高頻採樣 (每 15ms 一次)，確保抓到精準時間差
-            setInterval(analyzeTemporalPulse, 15); 
+            // 保持 12ms 極速採樣，確保不漏接任何 30Hz 脈衝切換
+            setInterval(analyzeTemporalPulse, 12); 
         }
 
         function analyzeTemporalPulse() {
@@ -116,8 +125,7 @@
                 ctx.drawImage(video, video.videoWidth/2 - 40, video.videoHeight/2 - 40, 80, 80, 0, 0, 80, 80);
                 
                 const imageData = ctx.getImageData(0, 0, 80, 80).data;
-                let totalBrightness = 0;
-                let maxB = 0, minB = 255;
+                let totalBrightness = 0, maxB = 0, minB = 255;
 
                 for (let i = 0; i < imageData.length; i += 4) {
                     let b = (imageData[i] + imageData[i+1] + imageData[i+2]) / 3;
@@ -129,7 +137,6 @@
                 let avgBrightness = totalBrightness / (canvas.width * canvas.height);
                 let contrast = maxB - minB;
 
-                // 確保環境對比足夠，濾除無效雜訊
                 if (contrast > 40) { 
                     let midPoint = minB + (contrast / 2);
                     let currentState = avgBrightness > midPoint ? 1 : 0;
@@ -156,10 +163,10 @@
         function decodePulse(state, duration) {
             const targetIdentity = document.getElementById('phoneIdentity').value;
             
-            // 我們只測量「亮區 (state=1)」的持續時間，用來判斷訊號種類
+            // 狀態 1 = 偵測亮光脈衝長度
             if (state === 1) {
-                // 1. 【START 標頭】預期 231ms (容許 190ms ~ 300ms)
-                if (duration >= 190 && duration <= 300) {
+                // 1. 【START 標頭】預期 231ms (容差設定：200ms ~ 320ms)
+                if (duration >= 200 && duration <= 320) {
                     isReceivingPacket = true;
                     currentSequence = []; 
                     debugDiv.innerText = "📥 [START] 封包開始，接收密碼中...";
@@ -167,26 +174,25 @@
                 }
 
                 if (isReceivingPacket) {
-                    // 2. 【SHORT 短訊號】預期 33ms (容許 15ms ~ 60ms)
-                    if (duration >= 15 && duration <= 60) {
+                    // 2. 【SHORT 短訊號】預期 33ms (容差設定：15ms ~ 65ms)
+                    if (duration >= 15 && duration <= 65) {
                         currentSequence.push("S");
                     } 
-                    // 3. 【LONG 長訊號】預期 99ms (容許 70ms ~ 130ms)
+                    // 3. 【LONG 長訊號】預期 99ms (容差設定：70ms ~ 130ms)
                     else if (duration >= 70 && duration <= 130) {
                         currentSequence.push("L");
                     } 
-                    // 4. 【END 結尾】預期 165ms (容許 140ms ~ 185ms)
-                    else if (duration >= 140 && duration <= 185) {
+                    // 4. 【END 結尾】預期 165ms (容差設定：135ms ~ 190ms)
+                    else if (duration >= 135 && duration <= 190) {
                         processPacket(targetIdentity);
                     }
                     else {
-                        // 異常雜訊，放棄當前封包
                         isReceivingPacket = false;
                         debugDiv.innerText = `❌ 雜訊干擾 (寬度: ${Math.round(duration)}ms)，丟棄封包`;
                     }
                 }
             } else {
-                // 若暗的間隔太久(超過 800ms)，重置狀態機
+                // 輪波間隔暗區 (約 500ms)，若超過 800ms 則重置防呆
                 if (duration > 800) {
                     isReceivingPacket = false;
                 }
@@ -194,70 +200,80 @@
         }
 
         function processPacket(targetIdentity) {
-            isReceivingPacket = false; // 封包接收完畢
+            isReceivingPacket = false; 
             let detectedCode = 0;
             
-            // 將陣列轉為字串方便比對，例如 "S,L"
+            // 將陣列轉為字串進行 6 組解碼匹配
             let sig = currentSequence.join(","); 
 
-            if (sig === "S,L") detectedCode = 1;
-            if (sig === "L,S") detectedCode = 2;
-            if (sig === "L,L") detectedCode = 3;
+            if (sig === "S,S,S") detectedCode = 1;
+            if (sig === "S,S,L") detectedCode = 2;
+            if (sig === "S,L,S") detectedCode = 3;
+            if (sig === "L,S,S") detectedCode = 4;
+            if (sig === "L,S,L") detectedCode = 5;
+            if (sig === "L,L,S") detectedCode = 6;
 
             if (detectedCode > 0) {
-                debugDiv.innerText = `✅ [END] 封包解析完成：【密碼 ${detectedCode}】`;
+                debugDiv.innerText = `✅ [END] 解析完成：【密碼 ${detectedCode}】(${sig})`;
                 
                 if (detectedCode == targetIdentity) {
                     sendData(detectedCode);
                 } else {
-                    statusDiv.innerText = `🔄 收到密碼 ${detectedCode}，非本機設定(${targetIdentity})，等待輪播中...`;
+                    statusDiv.innerText = `🔄 收到密碼 ${detectedCode}，非本機通道(手機${targetIdentity})，等待輪播...`;
                     statusDiv.style.color = "purple";
                 }
             } else {
-                debugDiv.innerText = `⚠️ 封包破損，無法解析 (${sig})`;
+                debugDiv.innerText = `⚠️ 封包不完整或破損 (${sig})`;
             }
             
-            currentSequence = []; // 清空緩衝區
+            currentSequence = []; 
         }
 
         let isSending = false;
         function sendData(matchedCode) {
             if (isSending) return;
-            const studentId = document.getElementById('studentId').value.trim();
+            const roomCode = document.getElementById('roomCode').value.trim();
+            const rawStudentId = document.getElementById('studentId').value.trim();
             
-            if(!studentId) {
-                statusDiv.innerText = `❌ 密碼 ${matchedCode} 驗證成功！但您忘記輸入學號。`;
+            if(!roomCode || !rawStudentId) {
+                statusDiv.innerText = `❌ 解碼成功！但請確認已輸入「教室代碼」與「學號」。`;
                 statusDiv.style.color = "red";
                 return;
             }
 
             // ==========================================
-            // 1 分鐘嚴格防刷機制 (基於學號)
+            // 結合學號與手機編號 (例如: 112001-手機3)
+            // ==========================================
+            const combinedStudentId = `${rawStudentId}-手機${matchedCode}`;
+
+            // ==========================================
+            // 1 分鐘嚴格防刷機制 (基於原始學號防刷)
             // ==========================================
             const now = Date.now();
-            const storageKey = 'lastCheckIn_' + studentId;
+            const storageKey = 'lastCheckIn_' + rawStudentId;
             const lastCheckIn = localStorage.getItem(storageKey);
 
             if (lastCheckIn) {
                 const timePassed = now - parseInt(lastCheckIn);
                 if (timePassed < COOLDOWN_MS) {
                     let remainSeconds = Math.ceil((COOLDOWN_MS - timePassed) / 1000);
-                    statusDiv.innerText = `⏳ 學號 ${studentId} 請勿狂刷！請等待 ${remainSeconds} 秒。`;
+                    statusDiv.innerText = `⏳ 學號 ${rawStudentId} 請勿狂刷！請等待 ${remainSeconds} 秒。`;
                     statusDiv.style.color = "red";
                     return; 
                 }
             }
 
             isSending = true;
-            statusDiv.innerText = `🎉 身份驗證通過 (密碼 ${matchedCode})！打卡傳送中...`;
+            statusDiv.innerText = `🎉 驗證通過！資料傳送中...`;
             statusDiv.style.color = "green";
 
-            const fetchUrl = `${API_URL}?student_id=${studentId}&room=Phone_${matchedCode}`;
+            // API 傳送結構：學號欄位放入結合體，教室欄位放入真實教室代碼
+            const fetchUrl = `${API_URL}?student_id=${encodeURIComponent(combinedStudentId)}&room=${encodeURIComponent(roomCode)}`;
             
             fetch(fetchUrl)
                 .then(response => response.text())
                 .then(result => {
-                    localStorage.setItem(storageKey, Date.now()); // 成功後寫入打卡時間
+                    localStorage.setItem(storageKey, Date.now()); 
                     statusDiv.innerText = "🎉 " + result + " (打卡成功)";
                     setTimeout(() => { 
                         isSending = false; 
