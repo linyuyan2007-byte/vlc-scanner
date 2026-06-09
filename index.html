@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 綠光特化打卡系統</title>
+    <title>Li-Fi 三軌極速打卡系統</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -40,7 +40,6 @@
             border: 3px dashed #00ff00;
             pointer-events: none;
             z-index: 10;
-            box-shadow: 0 0 10px rgba(0,255,0,0.5); /* 增加綠色光暈效果呼應硬體 */
         }
         
         #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
@@ -60,7 +59,7 @@
     </style>
 </head>
 <body>
-    <h2>Li-Fi 綠光極速解碼打卡</h2>
+    <h2>Li-Fi 三軌極速解碼打卡</h2>
     
     <div class="input-group">
         <label>🎓 學生學號：</label>
@@ -86,9 +85,9 @@
         <span class="zoom-icon">➕</span>
     </div>
     
-    <button id="startBtn" onclick="startCamera()">啟動綠光防震掃描</button>
+    <button id="startBtn" onclick="startCamera()">啟動自適應防震掃描</button>
     <div id="status">系統就緒，等待開啟...</div>
-    <div id="debug">三軌綠光特化系統就緒...</div>
+    <div id="debug">三軌動態系統就緒...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
@@ -101,7 +100,7 @@
         
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
         const COOLDOWN_MS = 60000; 
-        const FIXED_ROOM_CODE = "205";
+        const FIXED_ROOM_CODE = "205"; // 後台隱藏綁定的教室代碼
 
         let videoTrack = null;
         let nativeZoomSupported = false;
@@ -159,12 +158,12 @@
             }
 
             isWarmingUp = true;
-            statusDiv.innerText = "⏳ 綠光濾鏡校準中...";
+            statusDiv.innerText = "⏳ 系統曝光校準中...";
             statusDiv.style.color = "orange";
             
             setTimeout(() => {
                 isWarmingUp = false;
-                statusDiv.innerText = "請將【綠光 LED】對準畫面框內 (可放大)";
+                statusDiv.innerText = "請將 LED 放入綠框內 (可拉近放大)";
                 statusDiv.style.color = "#007bff";
             }, 2000);
 
@@ -181,31 +180,23 @@
                 ctx.drawImage(video, video.videoWidth/2 - captureSize/2, video.videoHeight/2 - captureSize/2, captureSize, captureSize, 0, 0, captureSize, captureSize);
                 
                 const imageData = ctx.getImageData(0, 0, captureSize, captureSize).data;
-                let totalGreenBrightness = 0;
+                let totalBrightness = 0;
 
-                // ==========================================
-                // 【核心修改】綠光 VIP 通道
-                // ==========================================
-                // 陣列排列為 [R, G, B, Alpha]。我們完全無視 i (紅) 和 i+2 (藍)
-                // 直接抽取最敏銳的 i+1 (綠色通道) 作為唯一的解析標準！
                 for (let i = 0; i < imageData.length; i += 4) {
-                    totalGreenBrightness += imageData[i+1];
+                    totalBrightness += (imageData[i] + imageData[i+1] + imageData[i+2]) / 3;
                 }
+                let avgBrightness = totalBrightness / (captureSize * captureSize);
                 
-                // 算出最純粹的綠光強度
-                let avgGreen = totalGreenBrightness / (captureSize * captureSize);
-                
-                temporalHistory.push(avgGreen);
+                temporalHistory.push(avgBrightness);
                 if (temporalHistory.length > 30) temporalHistory.shift(); 
 
                 let histMax = Math.max(...temporalHistory);
                 let histMin = Math.min(...temporalHistory);
                 let contrast = histMax - histMin;
 
-                // 綠光專屬對比閾值 (因為無雜訊干擾，波動非常乾淨)
                 if (contrast > 15) { 
                     let midPoint = histMin + (contrast / 2);
-                    let currentState = avgGreen > midPoint ? 1 : 0;
+                    let currentState = avgBrightness > midPoint ? 1 : 0;
 
                     if (lastState === -1) {
                         lastState = currentState;
@@ -233,7 +224,7 @@
                 if (duration >= 170 && duration <= 300) {
                     isReceivingPacket = true;
                     currentSequence = []; 
-                    debugDiv.innerText = "🎯 [鎖定] 綠光波形解碼中...";
+                    debugDiv.innerText = "🎯 [鎖定] 追瞄解碼中...";
                     return;
                 }
 
@@ -265,12 +256,13 @@
             
             let sig = currentSequence.join(","); 
 
+            // 精簡為 3 組驗證邏輯
             if (sig === "S,S,S") detectedCode = 1;
             if (sig === "S,S,L") detectedCode = 2;
             if (sig === "S,L,S") detectedCode = 3;
 
             if (detectedCode > 0) {
-                debugDiv.innerText = `✅ 綠光解碼成功：密碼 ${detectedCode} (${sig})`;
+                debugDiv.innerText = `✅ 解碼成功：密碼 ${detectedCode} (${sig})`;
                 
                 if (detectedCode == targetIdentity) {
                     sendData(detectedCode);
@@ -312,7 +304,7 @@
             }
 
             isSending = true;
-            statusDiv.innerText = `⚡ 綠光驗證通過！資料傳送中...`;
+            statusDiv.innerText = `⚡ 驗證通過！資料極速傳送中...`;
             statusDiv.style.color = "green";
 
             const fetchUrl = `${API_URL}?student_id=${encodeURIComponent(combinedStudentId)}&room=${encodeURIComponent(FIXED_ROOM_CODE)}`;
@@ -324,7 +316,7 @@
                     statusDiv.innerText = "🎉 " + result + " (打卡成功)";
                     setTimeout(() => { 
                         isSending = false; 
-                        statusDiv.innerText = "請將【綠光 LED】對準畫面框內 (可放大)";
+                        statusDiv.innerText = "請將 LED 放入綠框內 (可拉近放大)";
                         statusDiv.style.color = "#007bff";
                     }, 3000); 
                 })
