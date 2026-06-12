@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 動態演算法智慧打卡 (白光版)</title>
+    <title>Li-Fi 前置鏡頭打卡系統</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
         .video-container {
@@ -21,7 +21,8 @@
             justify-content: center;
             align-items: center;
         }
-        video { width: 100%; height: 100%; object-fit: cover; transform-origin: center center; transition: transform 0.1s ease-out; }
+        /* 加入 scaleX(-1) 讓預設畫面就像照鏡子，方向才不會錯亂 */
+        video { width: 100%; height: 100%; object-fit: cover; transform-origin: center center; transform: scaleX(-1); transition: transform 0.1s ease-out; }
         .target-box {
             position: absolute; top: 50%; left: 50%; width: 100px; height: 100px;
             transform: translate(-50%, -50%); border: 3px dashed #00ff00;
@@ -39,7 +40,7 @@
     </style>
 </head>
 <body>
-    <h2>Li-Fi 邏輯解碼智慧打卡</h2>
+    <h2>Li-Fi 前置鏡頭智慧打卡</h2>
     
     <div class="input-group">
         <label>🎓 學生學號：</label>
@@ -61,7 +62,7 @@
         <span>➕</span>
     </div>
     
-    <button id="startBtn" onclick="startCamera()">啟動白光自適應掃描</button>
+    <button id="startBtn" onclick="startCamera()">開啟前置鏡頭掃描</button>
     <div id="status">系統就緒，等待開啟...</div>
     <div id="debug">10-bit 動態解碼狀態機就緒...</div>
 
@@ -74,10 +75,9 @@
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        // 您的專屬 Google API
         const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
         const COOLDOWN_MS = 60000; 
-        const FIXED_ROOM_CODE = "205"; // 後台固定 205 教室
+        const FIXED_ROOM_CODE = "205";
 
         let videoTrack = null;
         let nativeZoomSupported = false;
@@ -93,16 +93,17 @@
             const zoomVal = parseFloat(document.getElementById('zoomSlider').value);
             if (nativeZoomSupported && videoTrack) {
                 videoTrack.applyConstraints({ advanced: [{ zoom: zoomVal }] }).catch(e => {});
-                video.style.transform = `scale(1)`; 
+                // 變焦時保留鏡像翻轉 scaleX(-1)
+                video.style.transform = `scaleX(-1) scale(1)`; 
             } else {
-                video.style.transform = `scale(${zoomVal})`;
+                video.style.transform = `scaleX(-1) scale(${zoomVal})`;
             }
-            // 變焦時清空記憶體防呆
             temporalHistory = []; currentSequence = []; isReceivingPacket = false; lastState = -1;
         }
 
         function startCamera() {
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            // 核心修改：將 facingMode 改為 "user" 以呼叫前置鏡頭
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } })
             .then(function(stream) { initCameraStream(stream); })
             .catch(function(err) {
                 navigator.mediaDevices.getUserMedia({ video: true })
@@ -135,7 +136,6 @@
                 statusDiv.innerText = "請將【白光 LED】對準方框 (可變焦)"; statusDiv.style.color = "#007bff";
             }, 2000);
 
-            // 每 12 毫秒高速採樣
             setInterval(analyzeTemporalPulse, 12); 
         }
 
@@ -150,7 +150,6 @@
                 const imageData = ctx.getImageData(0, 0, captureSize, captureSize).data;
                 let totalBrightness = 0;
 
-                // ⚪ 白光全頻譜通道：綜合 RGB 的能量
                 for (let i = 0; i < imageData.length; i += 4) {
                     totalBrightness += (imageData[i] + imageData[i+1] + imageData[i+2]) / 3;
                 }
@@ -163,7 +162,6 @@
                 let histMin = Math.min(...temporalHistory);
                 let contrast = histMax - histMin;
 
-                // 自適應抗光暈對比閾值
                 if (contrast > 15) { 
                     let midPoint = histMin + (contrast / 2);
                     let currentState = avgBrightness > midPoint ? 1 : 0;
@@ -186,7 +184,6 @@
             const targetIdentity = document.getElementById('targetCode').value;
             
             if (state === 1) {
-                // 攔截 START 標頭 (預期 210ms)
                 if (duration >= 170 && duration <= 300) {
                     isReceivingPacket = true; currentSequence = []; 
                     debugDiv.innerText = "🎯 [START] 接收二進位編碼中..."; return;
@@ -194,13 +191,13 @@
 
                 if (isReceivingPacket) {
                     if (duration >= 10 && duration <= 65) {
-                        currentSequence.push("0"); // 短脈衝 (30ms) 轉為 0
+                        currentSequence.push("0"); 
                     } 
                     else if (duration >= 70 && duration <= 125) {
-                        currentSequence.push("1"); // 長脈衝 (90ms) 轉為 1
+                        currentSequence.push("1"); 
                     } 
                     else if (duration >= 130 && duration <= 165) {
-                        processPacket(targetIdentity); // 攔截 END 結尾 (150ms)，準備還原
+                        processPacket(targetIdentity); 
                     }
                     else {
                         isReceivingPacket = false;
@@ -208,7 +205,6 @@
                     }
                 }
             } else {
-                // 暗區間隔過長重置
                 if (duration > 500) { isReceivingPacket = false; }
             }
         }
@@ -216,10 +212,9 @@
         function processPacket(targetIdentity) {
             isReceivingPacket = false; 
             
-            // 必須精準集滿 10 個 bit，確保資料完整無誤
             if (currentSequence.length === 10) {
                 let binaryString = currentSequence.join(""); 
-                let decodedNumber = parseInt(binaryString, 2); // 將 10-bit 二進位還原成一般數字
+                let decodedNumber = parseInt(binaryString, 2); 
 
                 debugDiv.innerText = `✅ 邏輯還原成功：號碼 ${decodedNumber} (Bin:${binaryString})`;
                 
