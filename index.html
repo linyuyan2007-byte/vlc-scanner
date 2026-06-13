@@ -3,34 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Li-Fi 前置鏡頭打卡系統</title>
+    <title>Li-Fi iLearn 動態打卡系統</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
-        .video-container {
-            position: relative;
-            display: inline-block;
-            width: 100%;
-            max-width: 300px;
-            border: 3px solid #2c3e50;
-            border-radius: 10px;
-            overflow: hidden;
-            background: #000;
-            margin-bottom: 10px;
-            aspect-ratio: 3/4; 
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        /* 加入 scaleX(-1) 讓預設畫面就像照鏡子，方向才不會錯亂 */
+        .video-container { position: relative; display: inline-block; width: 100%; max-width: 300px; border: 3px solid #2c3e50; border-radius: 10px; overflow: hidden; background: #000; margin-bottom: 10px; aspect-ratio: 3/4; display: flex; justify-content: center; align-items: center; }
         video { width: 100%; height: 100%; object-fit: cover; transform-origin: center center; transform: scaleX(-1); transition: transform 0.1s ease-out; }
-        .target-box {
-            position: absolute; top: 50%; left: 50%; width: 100px; height: 100px;
-            transform: translate(-50%, -50%); border: 3px dashed #00ff00;
-            pointer-events: none; z-index: 10; box-shadow: 0 0 10px rgba(255,255,255,0.5); 
-        }
+        .target-box { position: absolute; top: 50%; left: 50%; width: 100px; height: 100px; transform: translate(-50%, -50%); border: 3px dashed #00ff00; pointer-events: none; z-index: 10; box-shadow: 0 0 10px rgba(255,255,255,0.5); }
         #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; }
         #debug { color: #555; font-size: 11px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; font-weight:bold; }
-        input[type="text"], input[type="number"] { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 250px; margin-bottom: 10px; box-sizing: border-box; }
+        input[type="text"] { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 250px; margin-bottom: 10px; box-sizing: border-box; }
         .zoom-control { margin: 10px 0 20px 0; display: flex; align-items: center; justify-content: center; gap: 10px; }
         input[type="range"] { width: 180px; cursor: pointer; }
         button { padding: 12px 24px; font-size: 16px; background-color: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 250px; }
@@ -40,14 +21,11 @@
     </style>
 </head>
 <body>
-    <h2>Li-Fi 前置鏡頭智慧打卡</h2>
+    <h2>Li-Fi iLearn 自動核銷打卡</h2>
     
     <div class="input-group">
-        <label>🎓 學生學號：</label>
+        <label>🎓 您的學號：</label>
         <input type="text" id="studentId" placeholder="請輸入學號 (例: 112001)" />
-        
-        <label>🔐 您的綁定密碼 (年級+座號)：</label>
-        <input type="number" id="targetCode" placeholder="請輸入密碼 (例: 102)" />
     </div>
     <br>
     
@@ -64,36 +42,30 @@
     
     <button id="startBtn" onclick="startCamera()">開啟前置鏡頭掃描</button>
     <div id="status">系統就緒，等待開啟...</div>
-    <div id="debug">10-bit 動態解碼狀態機就緒...</div>
+    <div id="debug">動態攔截演算法就緒...</div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
+        // 🌟 您的專屬 API 網址已經完美植入！
+        const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
+        const COOLDOWN_MS = 60000; 
+
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         const statusDiv = document.getElementById('status');
         const debugDiv = document.getElementById('debug');
         
-        const API_URL = "https://script.google.com/macros/s/AKfycbyBVSH5XNEpiaPWhDoD4AhEURGxxhKSlTbqlpt4gg4CvQkkPC4qLn2WMwqFWkUb9niePw/exec";
-        const COOLDOWN_MS = 60000; 
-        const FIXED_ROOM_CODE = "205";
-
-        let videoTrack = null;
-        let nativeZoomSupported = false;
-
-        let lastState = -1;
-        let lastTransitionTime = performance.now();
-        let currentSequence = [];
-        let isReceivingPacket = false;
-        let isWarmingUp = false;
-        let temporalHistory = [];
+        let videoTrack = null; let nativeZoomSupported = false;
+        let lastState = -1; let lastTransitionTime = performance.now();
+        let currentSequence = []; let isReceivingPacket = false;
+        let isWarmingUp = false; let temporalHistory = []; let isSending = false;
 
         function updateZoom() {
             const zoomVal = parseFloat(document.getElementById('zoomSlider').value);
             if (nativeZoomSupported && videoTrack) {
                 videoTrack.applyConstraints({ advanced: [{ zoom: zoomVal }] }).catch(e => {});
-                // 變焦時保留鏡像翻轉 scaleX(-1)
                 video.style.transform = `scaleX(-1) scale(1)`; 
             } else {
                 video.style.transform = `scaleX(-1) scale(${zoomVal})`;
@@ -102,7 +74,6 @@
         }
 
         function startCamera() {
-            // 核心修改：將 facingMode 改為 "user" 以呼叫前置鏡頭
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } })
             .then(function(stream) { initCameraStream(stream); })
             .catch(function(err) {
@@ -117,7 +88,6 @@
         function initCameraStream(stream) {
             video.srcObject = stream;
             videoTrack = stream.getVideoTracks()[0];
-            
             const capabilities = videoTrack.getCapabilities();
             const slider = document.getElementById('zoomSlider');
             if (capabilities.zoom) {
@@ -127,21 +97,16 @@
                 nativeZoomSupported = false;
                 slider.min = 1; slider.max = 5; slider.step = 0.1; slider.value = 1;
             }
-
-            isWarmingUp = true;
-            statusDiv.innerText = "⏳ 白光動態校準中..."; statusDiv.style.color = "orange";
-            
+            isWarmingUp = true; statusDiv.innerText = "⏳ 白光動態校準中..."; statusDiv.style.color = "orange";
             setTimeout(() => {
                 isWarmingUp = false;
-                statusDiv.innerText = "請將【白光 LED】對準方框 (可變焦)"; statusDiv.style.color = "#007bff";
+                statusDiv.innerText = "請將螢幕【綠色虛線框】對準 LED 光點"; statusDiv.style.color = "#007bff";
             }, 2000);
-
             setInterval(analyzeTemporalPulse, 12); 
         }
 
         function analyzeTemporalPulse() {
             if (isWarmingUp || isSending) return;
-
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
                 const captureSize = 100; 
                 canvas.width = captureSize; canvas.height = captureSize; 
@@ -149,132 +114,78 @@
                 
                 const imageData = ctx.getImageData(0, 0, captureSize, captureSize).data;
                 let totalBrightness = 0;
-
-                for (let i = 0; i < imageData.length; i += 4) {
-                    totalBrightness += (imageData[i] + imageData[i+1] + imageData[i+2]) / 3;
-                }
+                for (let i = 0; i < imageData.length; i += 4) { totalBrightness += (imageData[i] + imageData[i+1] + imageData[i+2]) / 3; }
                 let avgBrightness = totalBrightness / (captureSize * captureSize);
                 
                 temporalHistory.push(avgBrightness);
                 if (temporalHistory.length > 30) temporalHistory.shift(); 
 
-                let histMax = Math.max(...temporalHistory);
-                let histMin = Math.min(...temporalHistory);
+                let histMax = Math.max(...temporalHistory); let histMin = Math.min(...temporalHistory);
                 let contrast = histMax - histMin;
 
                 if (contrast > 15) { 
                     let midPoint = histMin + (contrast / 2);
                     let currentState = avgBrightness > midPoint ? 1 : 0;
-
-                    if (lastState === -1) {
-                        lastState = currentState; lastTransitionTime = performance.now(); return;
-                    }
-
+                    if (lastState === -1) { lastState = currentState; lastTransitionTime = performance.now(); return; }
                     if (currentState !== lastState) {
-                        let now = performance.now();
-                        let duration = now - lastTransitionTime; 
-                        decodePulse(lastState, duration);
-                        lastState = currentState; lastTransitionTime = now;
+                        let now = performance.now(); let duration = now - lastTransitionTime; 
+                        decodePulse(lastState, duration); lastState = currentState; lastTransitionTime = now;
                     }
                 }
             }
         }
 
         function decodePulse(state, duration) {
-            const targetIdentity = document.getElementById('targetCode').value;
-            
             if (state === 1) {
                 if (duration >= 170 && duration <= 300) {
                     isReceivingPacket = true; currentSequence = []; 
-                    debugDiv.innerText = "🎯 [START] 接收二進位編碼中..."; return;
+                    debugDiv.innerText = "🎯 [START] 發現動態密碼..."; return;
                 }
-
                 if (isReceivingPacket) {
-                    if (duration >= 10 && duration <= 65) {
-                        currentSequence.push("0"); 
-                    } 
-                    else if (duration >= 70 && duration <= 125) {
-                        currentSequence.push("1"); 
-                    } 
-                    else if (duration >= 130 && duration <= 165) {
-                        processPacket(targetIdentity); 
-                    }
-                    else {
-                        isReceivingPacket = false;
-                        debugDiv.innerText = `❌ 訊號斷開 (${Math.round(duration)}ms)，重新鎖定`;
-                    }
+                    if (duration >= 10 && duration <= 65) currentSequence.push("0"); 
+                    else if (duration >= 70 && duration <= 125) currentSequence.push("1"); 
+                    else if (duration >= 130 && duration <= 165) processPacket(); 
+                    else { isReceivingPacket = false; debugDiv.innerText = `❌ 訊號斷開，重新鎖定中`; }
                 }
-            } else {
-                if (duration > 500) { isReceivingPacket = false; }
-            }
+            } else { if (duration > 500) { isReceivingPacket = false; } }
         }
 
-        function processPacket(targetIdentity) {
+        function processPacket() {
             isReceivingPacket = false; 
-            
             if (currentSequence.length === 10) {
                 let binaryString = currentSequence.join(""); 
                 let decodedNumber = parseInt(binaryString, 2); 
-
-                debugDiv.innerText = `✅ 邏輯還原成功：號碼 ${decodedNumber} (Bin:${binaryString})`;
-                
-                if (decodedNumber == targetIdentity) {
-                    sendData(decodedNumber);
-                } else {
-                    statusDiv.innerText = `⏩ 略過號碼 ${decodedNumber}，尋找目標 ${targetIdentity}...`;
-                    statusDiv.style.color = "purple";
-                }
-            } else {
-                debugDiv.innerText = `⚠️ 封包長度不符 (收到 ${currentSequence.length}/10 bits)`;
-            }
-            
+                debugDiv.innerText = `✅ 攔截成功！憑證碼: ${decodedNumber}`;
+                sendData(decodedNumber);
+            } else { debugDiv.innerText = `⚠️ 封包破損，請維持穩定`; }
             currentSequence = []; 
         }
 
-        let isSending = false;
-        function sendData(matchedCode) {
+        function sendData(capturedRoomCode) {
             if (isSending) return;
             const rawStudentId = document.getElementById('studentId').value.trim();
-            const targetCode = document.getElementById('targetCode').value.trim();
-            
-            if(!rawStudentId || !targetCode) {
-                statusDiv.innerText = `❌ 請輸入學號與綁定密碼！`; statusDiv.style.color = "red"; return;
-            }
+            if(!rawStudentId) { statusDiv.innerText = `❌ 請先輸入學號！`; statusDiv.style.color = "red"; return; }
 
-            const combinedStudentId = `${rawStudentId}-號碼${matchedCode}`;
-            const now = Date.now();
-            const storageKey = 'lastCheckIn_' + rawStudentId;
+            const now = Date.now(); const storageKey = 'lastCheckIn_' + rawStudentId;
             const lastCheckIn = localStorage.getItem(storageKey);
-
-            if (lastCheckIn) {
-                const timePassed = now - parseInt(lastCheckIn);
-                if (timePassed < COOLDOWN_MS) {
-                    let remainSeconds = Math.ceil((COOLDOWN_MS - timePassed) / 1000);
-                    statusDiv.innerText = `⏳ 防刷機制啟動！請等待 ${remainSeconds} 秒。`;
-                    statusDiv.style.color = "red"; return; 
-                }
+            if (lastCheckIn && (now - parseInt(lastCheckIn) < COOLDOWN_MS)) {
+                let remainSeconds = Math.ceil((COOLDOWN_MS - (now - parseInt(lastCheckIn))) / 1000);
+                statusDiv.innerText = `⏳ 防刷機制啟動！請等待 ${remainSeconds} 秒。`; statusDiv.style.color = "red"; return; 
             }
 
             isSending = true;
-            statusDiv.innerText = `⚡ 驗證通過！資料上傳至 205 教室後台...`;
-            statusDiv.style.color = "green";
+            statusDiv.innerText = `⚡ 取得光學憑證 (${capturedRoomCode})，資料上傳中...`; statusDiv.style.color = "green";
 
-            const fetchUrl = `${API_URL}?student_id=${encodeURIComponent(combinedStudentId)}&room=${encodeURIComponent(FIXED_ROOM_CODE)}`;
+            const fetchUrl = `${API_URL}?student_id=${encodeURIComponent(rawStudentId)}&room=${encodeURIComponent(capturedRoomCode)}`;
             
             fetch(fetchUrl)
                 .then(response => response.text())
                 .then(result => {
                     localStorage.setItem(storageKey, Date.now()); 
-                    statusDiv.innerText = "🎉 " + result + " (打卡成功)";
-                    setTimeout(() => { 
-                        isSending = false; 
-                        statusDiv.innerText = "請將【白光 LED】對準方框 (可變焦)";
-                        statusDiv.style.color = "#007bff";
-                    }, 3000); 
+                    statusDiv.innerText = "🎉 " + result;
+                    setTimeout(() => { isSending = false; statusDiv.innerText = "請將螢幕【綠色虛線框】對準 LED 光點"; statusDiv.style.color = "#007bff"; }, 3000); 
                 })
-                .catch(error => {
-                    statusDiv.innerText = "網路連線失敗，請檢查網路"; isSending = false;
-                });
+                .catch(error => { statusDiv.innerText = "網路連線失敗，請檢查網路"; isSending = false; });
         }
     </script>
 </body>
