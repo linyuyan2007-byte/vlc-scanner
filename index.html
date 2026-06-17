@@ -196,4 +196,17 @@
             isSending = true;
             statusDiv.innerText = `⚡ 取得光學憑證 (${capturedRoomCode})，資料上傳中...`; statusDiv.style.color = "green";
 
-            const fetchUrl = `${API_URL}?student_id=${encodeURIComponent(rawStudentId)}&room=${encodeURIComponent(
+            const fetchUrl = `${API_URL}?student_id=${encodeURIComponent(rawStudentId)}&room=${encodeURIComponent(capturedRoomCode)}`;
+            
+            fetch(fetchUrl)
+                .then(response => response.text())
+                .then(result => {
+                    localStorage.setItem(storageKey, Date.now()); 
+                    statusDiv.innerText = "🎉 " + result;
+                    setTimeout(() => { isSending = false; statusDiv.innerText = "請將螢幕【綠色虛線框】對準 LED 光點"; statusDiv.style.color = "#007bff"; }, 3000); 
+                })
+                .catch(error => { statusDiv.innerText = "網路連線失敗，請檢查網路"; isSending = false; });
+        }
+    </script>
+</body>
+</html>
