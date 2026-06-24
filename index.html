@@ -1,204 +1,253 @@
-// 🌟 您的專屬 API 網址
-const API_URL = "https://script.google.com/macros/s/AKfycbz53m7ku_7A_TohUbTMFwSHa_TryvQ8VER3ljxSpVZWTjxm3NbkCeawUop9Ld_f42AFkQ/exec";
-const LOCK_SEC = 60; // ⏱️ 測試模式：先鎖 60 秒！
-
-const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d', { willReadFrequently: true });
-const statusDiv = document.getElementById('status');
-const debugDiv = document.getElementById('debug');
-const studentInput = document.getElementById('studentId');
-const startButton = document.getElementById('startBtn');
-
-let videoTrack = null; let nativeZoomSupported = false;
-let lastState = -1; let lastTransitionTime = performance.now();
-let currentSequence = []; let isReceivingPacket = false;
-let isWarmingUp = false; let temporalHistory = []; let isSending = false;
-let lockTimer = null;
-
-window.onload = function() {
-    checkDeviceLock();
-    // 💡 神奇魔法：每 1 秒檢查一次鎖定剩餘時間，讓按鈕文字自己倒數！
-    lockTimer = setInterval(() => { 
-        if(studentInput.disabled) checkDeviceLock(); 
-    }, 1000);
-};
-
-function checkDeviceLock() {
-    const lockedId = localStorage.getItem('device_locked_id');
-    const lockedTime = localStorage.getItem('device_locked_timestamp');
-
-    if (lockedId && lockedTime) {
-        const secPassed = (Date.now() - parseInt(lockedTime)) / 1000; // 改成算「秒」
-        
-        if (secPassed < LOCK_SEC) {
-            const remain = Math.ceil(LOCK_SEC - secPassed);
-            studentInput.value = lockedId;
-            studentInput.disabled = true;
-            startButton.disabled = true;
-            startButton.innerText = `🔒 測試上銬中 (剩餘 ${remain} 秒)`;
-            startButton.style.backgroundColor = "#95a5a6";
-            
-            statusDiv.innerText = `⚠️ 設備已綁定學號 [ ${lockedId} ]\n測試模式：倒數結束後自動解除封印。`;
-            statusDiv.style.color = "#d35400";
-            return true; 
-        } else {
-            // 倒數完畢！自動把鎖鏈剪斷
-            localStorage.removeItem('device_locked_id');
-            localStorage.removeItem('device_locked_timestamp');
-            
-            studentInput.disabled = false;
-            studentInput.value = ""; // 清空輸入框讓您打下一個
-            startButton.disabled = false;
-            startButton.innerText = "開啟前置鏡頭掃描";
-            startButton.style.backgroundColor = "#2ecc71";
-            statusDiv.innerText = "✨ 鎖定已解除！請測試輸入第二個學號。";
-            statusDiv.style.color = "#2ecc71";
-        }
-    }
-    return false;
-}
-
-function updateZoom() {
-    const zoomVal = parseFloat(document.getElementById('zoomSlider').value);
-    if (nativeZoomSupported && videoTrack) {
-        videoTrack.applyConstraints({ advanced: [{ zoom: zoomVal }] }).catch(e => {});
-        video.style.transform = `scaleX(-1) scale(1)`; 
-    } else {
-        video.style.transform = `scaleX(-1) scale(${zoomVal})`;
-    }
-    temporalHistory = []; currentSequence = []; isReceivingPacket = false; lastState = -1;
-}
-
-function startCamera() {
-    if (checkDeviceLock()) return;
-
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } })
-    .then(function(stream) { initCameraStream(stream); })
-    .catch(function(err) {
-        navigator.mediaDevices.getUserMedia({ video: true })
-        .then(function(stream) { initCameraStream(stream); })
-        .catch(function(err2) {
-            statusDiv.innerText = "❌ 無法開啟相機！請允許權限。"; statusDiv.style.color = "red";
-        });
-    });
-}
-
-function initCameraStream(stream) {
-    video.srcObject = stream;
-    videoTrack = stream.getVideoTracks()[0];
-    const capabilities = videoTrack.getCapabilities();
-    const slider = document.getElementById('zoomSlider');
-    if (capabilities.zoom) {
-        nativeZoomSupported = true;
-        slider.min = capabilities.zoom.min; slider.max = capabilities.zoom.max; slider.step = capabilities.zoom.step; slider.value = capabilities.zoom.min;
-    } else {
-        nativeZoomSupported = false;
-        slider.min = 1; slider.max = 5; slider.step = 0.1; slider.value = 1;
-    }
-    isWarmingUp = true; statusDiv.innerText = "⏳ 白光動態校準中..."; statusDiv.style.color = "orange";
-    setTimeout(() => {
-        isWarmingUp = false;
-        statusDiv.innerText = "請將螢幕【綠色虛線框】對準 LED 光點"; statusDiv.style.color = "#007bff";
-    }, 2000);
-    setInterval(analyzeTemporalPulse, 12); 
-}
-
-function analyzeTemporalPulse() {
-    if (isWarmingUp || isSending) return;
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        const captureSize = 100; 
-        canvas.width = captureSize; canvas.height = captureSize; 
-        ctx.drawImage(video, video.videoWidth/2 - captureSize/2, video.videoHeight/2 - captureSize/2, captureSize, captureSize, 0, 0, captureSize, captureSize);
-        
-        const imageData = ctx.getImageData(0, 0, captureSize, captureSize).data;
-        let totalBrightness = 0;
-        for (let i = 0; i < imageData.length; i += 4) { totalBrightness += (imageData[i] + imageData[i+1] + imageData[i+2]) / 3; }
-        let avgBrightness = totalBrightness / (captureSize * captureSize);
-        
-        temporalHistory.push(avgBrightness);
-        if (temporalHistory.length > 30) temporalHistory.shift(); 
-
-        let histMax = Math.max(...temporalHistory); let histMin = Math.min(...temporalHistory);
-        let contrast = histMax - histMin;
-
-        if (contrast > 15) { 
-            let midPoint = histMin + (contrast / 2);
-            let currentState = avgBrightness > midPoint ? 1 : 0;
-            if (lastState === -1) { lastState = currentState; lastTransitionTime = performance.now(); return; }
-            if (currentState !== lastState) {
-                let now = performance.now(); let duration = now - lastTransitionTime; 
-                decodePulse(lastState, duration); lastState = currentState; lastTransitionTime = now;
-            }
-        }
-    }
-}
-
-function decodePulse(state, duration) {
-    if (state === 1) {
-        if (duration >= 330 && duration <= 550) { 
-            isReceivingPacket = true; currentSequence = []; 
-            debugDiv.innerText = "🎯 [START] 發現動態密碼..."; return;
-        }
-        if (isReceivingPacket) {
-            if (duration >= 30 && duration <= 110) { currentSequence.push("0"); } 
-            else if (duration >= 130 && duration <= 240) { currentSequence.push("1"); } 
-            else if (duration >= 250 && duration <= 380) { processPacket(); } 
-            else { isReceivingPacket = false; debugDiv.innerText = `❌ 訊號斷開，重新鎖定中`; }
-        }
-    } else { 
-        if (duration > 800) { isReceivingPacket = false; } 
-    }
-}
-
-function processPacket() {
-    isReceivingPacket = false; 
-    if (currentSequence.length === 10) {
-        let binaryString = currentSequence.join(""); 
-        let decodedNumber = parseInt(binaryString, 2); 
-        debugDiv.innerText = `✅ 攔截成功！憑證碼: ${decodedNumber}`;
-        sendData(decodedNumber);
-    } else { 
-        debugDiv.innerText = `⚠️ 封包破損 (${currentSequence.length} bits)，請維持穩定`; 
-    }
-    currentSequence = []; 
-}
-
-function sendData(capturedRoomCode) {
-    if (isSending) return;
-    if (checkDeviceLock()) return; 
-
-    const rawStudentId = studentInput.value.trim();
-    if(!rawStudentId) { statusDiv.innerText = `❌ 請先輸入學號！`; statusDiv.style.color = "red"; return; }
-
-    isSending = true;
-    statusDiv.innerText = `⚡ 取得光學憑證 (${capturedRoomCode})，資料上傳中...`; statusDiv.style.color = "green";
-
-    const fetchUrl = `${API_URL}?student_id=${encodeURIComponent(rawStudentId)}&room=${encodeURIComponent(capturedRoomCode)}`;
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Li-Fi iLearn 動態打卡系統</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; background-color: #f0f3f6; }
+        .video-container { position: relative; display: inline-block; width: 100%; max-width: 300px; border: 3px solid #2c3e50; border-radius: 10px; overflow: hidden; background: #000; margin-bottom: 10px; aspect-ratio: 3/4; display: flex; justify-content: center; align-items: center; }
+        video { width: 100%; height: 100%; object-fit: cover; transform-origin: center center; transform: scaleX(-1); transition: transform 0.1s ease-out; }
+        .target-box { position: absolute; top: 50%; left: 50%; width: 100px; height: 100px; transform: translate(-50%, -50%); border: 3px dashed #00ff00; pointer-events: none; z-index: 10; box-shadow: 0 0 10px rgba(255,255,255,0.5); }
+        #status { font-weight: bold; color: #2c3e50; margin-top: 15px; font-size: 16px; min-height: 48px; white-space: pre-line; }
+        #debug { color: #555; font-size: 11px; margin-top: 10px; font-family: monospace; background: #fff; padding: 5px; display: inline-block; border-radius: 4px; font-weight:bold; }
+        input[type="text"] { padding: 10px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 250px; margin-bottom: 10px; box-sizing: border-box; }
+        .zoom-control { margin: 10px 0 20px 0; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        input[type="range"] { width: 180px; cursor: pointer; }
+        button { padding: 12px 24px; font-size: 16px; background-color: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 250px; }
+        button:hover { background-color: #27ae60; }
+        .input-group { background: #fff; padding: 20px 15px 15px 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: inline-block; margin-bottom: 15px; text-align: left; width: 250px; }
+        .input-group label { font-size: 14px; font-weight: bold; color: #333; display: block; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+    <h2 onclick="unlockBackdoor()">Li-Fi iLearn 自動核銷打卡</h2>
     
-    fetch(fetchUrl)
-        .then(response => response.text())
-        .then(result => {
-            statusDiv.innerText = "🎉 " + result;
+    <div class="input-group">
+        <label>🎓 您的學號：</label>
+        <input type="text" id="studentId" placeholder="請輸入學號 (例: 112001)" />
+    </div>
+    <br>
+    
+    <div class="video-container">
+        <video id="video" autoplay playsinline></video>
+        <div class="target-box"></div>
+    </div>
+    
+    <div class="zoom-control">
+        <span>🔍</span>
+        <input type="range" id="zoomSlider" min="1" max="5" step="0.1" value="1" oninput="updateZoom()">
+        <span>➕</span>
+    </div>
+    
+    <button id="startBtn" onclick="startCamera()">開啟前置鏡頭掃描</button>
+    <div id="status">系統就緒，等待開啟...</div>
+    <div id="debug">動態攔截演算法就緒...</div>
 
-            if (result.includes("成功")) {
-                localStorage.setItem('device_locked_id', rawStudentId);
-                localStorage.setItem('device_locked_timestamp', Date.now());
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        const API_URL = "https://script.google.com/macros/s/AKfycbz53m7ku_7A_TohUbTMFwSHa_TryvQ8VER3ljxSpVZWTjxm3NbkCeawUop9Ld_f42AFkQ/exec";
+        const LOCK_SEC = 60; // ⏱️ 測試模式：先鎖 60 秒倒數！
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const statusDiv = document.getElementById('status');
+        const debugDiv = document.getElementById('debug');
+        const studentInput = document.getElementById('studentId');
+        const startButton = document.getElementById('startBtn');
+
+        let videoTrack = null; let nativeZoomSupported = false;
+        let lastState = -1; let lastTransitionTime = performance.now();
+        let currentSequence = []; let isReceivingPacket = false;
+        let isWarmingUp = false; let temporalHistory = []; let isSending = false;
+        let lockTimer = null;
+
+        window.onload = function() {
+            checkDeviceLock();
+            lockTimer = setInterval(() => { 
+                if(studentInput.disabled) checkDeviceLock(); 
+            }, 1000);
+        };
+
+        function checkDeviceLock() {
+            const lockedId = localStorage.getItem('device_locked_id');
+            const lockedTime = localStorage.getItem('device_locked_timestamp');
+
+            if (lockedId && lockedTime) {
+                const secPassed = (Date.now() - parseInt(lockedTime)) / 1000;
                 
-                setTimeout(() => { checkDeviceLock(); }, 2000);
-            } else {
-                setTimeout(() => { isSending = false; statusDiv.innerText = "請將螢幕【綠色虛線框】對準 LED 光點"; statusDiv.style.color = "#007bff"; }, 3000); 
+                if (secPassed < LOCK_SEC) {
+                    const remain = Math.ceil(LOCK_SEC - secPassed);
+                    studentInput.value = lockedId;
+                    studentInput.disabled = true;
+                    startButton.disabled = true;
+                    startButton.innerText = `🔒 測試上銬中 (剩餘 ${remain} 秒)`;
+                    startButton.style.backgroundColor = "#95a5a6";
+                    
+                    statusDiv.innerText = `⚠️ 設備已綁定學號 [ ${lockedId} ]\n測試模式：倒數結束後自動解除封印。`;
+                    statusDiv.style.color = "#d35400";
+                    return true; 
+                } else {
+                    localStorage.removeItem('device_locked_id');
+                    localStorage.removeItem('device_locked_timestamp');
+                    
+                    studentInput.disabled = false;
+                    studentInput.value = ""; 
+                    startButton.disabled = false;
+                    startButton.innerText = "開啟前置鏡頭掃描";
+                    startButton.style.backgroundColor = "#2ecc71";
+                    statusDiv.innerText = "✨ 鎖定已解除！請測試輸入第二個學號。";
+                    statusDiv.style.color = "#2ecc71";
+                }
             }
-        })
-        .catch(error => { statusDiv.innerText = "網路連線失敗，請檢查網路"; isSending = false; });
-}
+            return false;
+        }
 
-let secretClickCount = 0;
-function unlockBackdoor() {
-    secretClickCount++;
-    if (secretClickCount >= 5) {
-        localStorage.clear();
-        alert("🛠️ [教師後門授權] 本設備鎖定已解除，可重新輸入學號。");
-        location.reload();
-    }
-}
+        function updateZoom() {
+            const zoomVal = parseFloat(document.getElementById('zoomSlider').value);
+            if (nativeZoomSupported && videoTrack) {
+                videoTrack.applyConstraints({ advanced: [{ zoom: zoomVal }] }).catch(e => {});
+                video.style.transform = `scaleX(-1) scale(1)`; 
+            } else {
+                video.style.transform = `scaleX(-1) scale(${zoomVal})`;
+            }
+            temporalHistory = []; currentSequence = []; isReceivingPacket = false; lastState = -1;
+        }
+
+        function startCamera() {
+            if (checkDeviceLock()) return;
+
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } })
+            .then(function(stream) { initCameraStream(stream); })
+            .catch(function(err) {
+                navigator.mediaDevices.getUserMedia({ video: true })
+                .then(function(stream) { initCameraStream(stream); })
+                .catch(function(err2) {
+                    statusDiv.innerText = "❌ 無法開啟相機！請允許權限。"; statusDiv.style.color = "red";
+                });
+            });
+        }
+
+        function initCameraStream(stream) {
+            video.srcObject = stream;
+            videoTrack = stream.getVideoTracks()[0];
+            const capabilities = videoTrack.getCapabilities();
+            const slider = document.getElementById('zoomSlider');
+            if (capabilities.zoom) {
+                nativeZoomSupported = true;
+                slider.min = capabilities.zoom.min; slider.max = capabilities.zoom.max; slider.step = capabilities.zoom.step; slider.value = capabilities.zoom.min;
+            } else {
+                nativeZoomSupported = false;
+                slider.min = 1; slider.max = 5; slider.step = 0.1; slider.value = 1;
+            }
+            isWarmingUp = true; statusDiv.innerText = "⏳ 白光動態校準中..."; statusDiv.style.color = "orange";
+            setTimeout(() => {
+                isWarmingUp = false;
+                statusDiv.innerText = "請將螢幕【綠色虛線框】對準 LED 光點"; statusDiv.style.color = "#007bff";
+            }, 2000);
+            setInterval(analyzeTemporalPulse, 12); 
+        }
+
+        function analyzeTemporalPulse() {
+            if (isWarmingUp || isSending) return;
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                const captureSize = 100; 
+                canvas.width = captureSize; canvas.height = captureSize; 
+                ctx.drawImage(video, video.videoWidth/2 - captureSize/2, video.videoHeight/2 - captureSize/2, captureSize, captureSize, 0, 0, captureSize, captureSize);
+                
+                const imageData = ctx.getImageData(0, 0, captureSize, captureSize).data;
+                let totalBrightness = 0;
+                for (let i = 0; i < imageData.length; i += 4) { totalBrightness += (imageData[i] + imageData[i+1] + imageData[i+2]) / 3; }
+                let avgBrightness = totalBrightness / (captureSize * captureSize);
+                
+                temporalHistory.push(avgBrightness);
+                if (temporalHistory.length > 30) temporalHistory.shift(); 
+
+                let histMax = Math.max(...temporalHistory); let histMin = Math.min(...temporalHistory);
+                let contrast = histMax - histMin;
+
+                if (contrast > 15) { 
+                    let midPoint = histMin + (contrast / 2);
+                    let currentState = avgBrightness > midPoint ? 1 : 0;
+                    if (lastState === -1) { lastState = currentState; lastTransitionTime = performance.now(); return; }
+                    if (currentState !== lastState) {
+                        let now = performance.now(); let duration = now - lastTransitionTime; 
+                        decodePulse(lastState, duration); lastState = currentState; lastTransitionTime = now;
+                    }
+                }
+            }
+        }
+
+        function decodePulse(state, duration) {
+            if (state === 1) {
+                if (duration >= 330 && duration <= 550) { 
+                    isReceivingPacket = true; currentSequence = []; 
+                    debugDiv.innerText = "🎯 [START] 發現動態密碼..."; return;
+                }
+                if (isReceivingPacket) {
+                    if (duration >= 30 && duration <= 110) { currentSequence.push("0"); } 
+                    else if (duration >= 130 && duration <= 240) { currentSequence.push("1"); } 
+                    else if (duration >= 250 && duration <= 380) { processPacket(); } 
+                    else { isReceivingPacket = false; debugDiv.innerText = `❌ 訊號斷開，重新鎖定中`; }
+                }
+            } else { 
+                if (duration > 800) { isReceivingPacket = false; } 
+            }
+        }
+
+        function processPacket() {
+            isReceivingPacket = false; 
+            if (currentSequence.length === 10) {
+                let binaryString = currentSequence.join(""); 
+                let decodedNumber = parseInt(binaryString, 2); 
+                debugDiv.innerText = `✅ 攔截成功！憑證碼: ${decodedNumber}`;
+                sendData(decodedNumber);
+            } else { 
+                debugDiv.innerText = `⚠️ 封包破損 (${currentSequence.length} bits)，請維持穩定`; 
+            }
+            currentSequence = []; 
+        }
+
+        function sendData(capturedRoomCode) {
+            if (isSending) return;
+            if (checkDeviceLock()) return; 
+
+            const rawStudentId = studentInput.value.trim();
+            if(!rawStudentId) { statusDiv.innerText = `❌ 請先輸入學號！`; statusDiv.style.color = "red"; return; }
+
+            isSending = true;
+            statusDiv.innerText = `⚡ 取得光學憑證 (${capturedRoomCode})，資料上傳中...`; statusDiv.style.color = "green";
+
+            const fetchUrl = `${API_URL}?student_id=${encodeURIComponent(rawStudentId)}&room=${encodeURIComponent(capturedRoomCode)}`;
+            
+            fetch(fetchUrl)
+                .then(response => response.text())
+                .then(result => {
+                    statusDiv.innerText = "🎉 " + result;
+
+                    if (result.includes("成功")) {
+                        localStorage.setItem('device_locked_id', rawStudentId);
+                        localStorage.setItem('device_locked_timestamp', Date.now());
+                        
+                        setTimeout(() => { checkDeviceLock(); }, 2000);
+                    } else {
+                        setTimeout(() => { isSending = false; statusDiv.innerText = "請將螢幕【綠色虛線框】對準 LED 光點"; statusDiv.style.color = "#007bff"; }, 3000); 
+                    }
+                })
+                .catch(error => { statusDiv.innerText = "網路連線失敗，請檢查網路"; isSending = false; });
+        }
+
+        let secretClickCount = 0;
+        function unlockBackdoor() {
+            secretClickCount++;
+            if (secretClickCount >= 5) {
+                localStorage.clear();
+                alert("🛠️ [教師後門授權] 本設備鎖定已解除，可重新輸入學號。");
+                location.reload();
+            }
+        }
+    </script>
+</body>
+</html>
